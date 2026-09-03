@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: sellora-catalog-db
+    environment:
+      POSTGRES_DB: catalog_db
+      POSTGRES_USER: sellora
+      POSTGRES_PASSWORD: sellora_dev_pw
+    ports:
+      - "5434:5432"
+    volumes:
+      - sellora_catalog_pgdata:/var/lib/postgresql/data
+
+volumes:
+  sellora_catalog_pgdata:
+
