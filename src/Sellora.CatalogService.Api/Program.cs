@@ -34,6 +34,20 @@ builder.Services
             ValidateIssuerSigningKey = true,
             ClockSkew = TimeSpan.FromSeconds(30)
         };
+
+        // The shared development Identity Server currently uses a certificate
+        // that is not trusted by local developer machines. This exception is
+        // deliberately limited to Development; production must use a trusted
+        // certificate and must never bypass TLS validation.
+        if (builder.Environment.IsDevelopment())
+        {
+            options.BackchannelHttpHandler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback =
+                    HttpClientHandler
+                        .DangerousAcceptAnyServerCertificateValidator
+            };
+        }
     });
 
 builder.Services.AddAuthorization(options => options.AddSelloraCatalogPolicies());
