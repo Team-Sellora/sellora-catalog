@@ -6,14 +6,14 @@ namespace Sellora.CatalogService.Infrastructure.Persistence;
 
 public class CatalogDbContext : DbContext
 {
-    private readonly ITenantContext __tenantContext;
+    private readonly ITenantContext _tenantContext;
 
     public CatalogDbContext(
         DbContextOptions<CatalogDbContext> options,
         ITenantContext tenantContext)
         : base(options)
     {
-        __tenantContext = tenantContext;
+        _tenantContext = tenantContext;
     }
 
     public DbSet<Product> Products => Set<Product>();
@@ -23,8 +23,18 @@ public class CatalogDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(CatalogDbContext).Assembly);
+        modelBuilder.ApplyConfigurationsFromAssembly(
+            typeof(CatalogDbContext).Assembly);
 
+        modelBuilder.Entity<Product>()
+            .HasQueryFilter(product =>
+                _tenantContext.CompanyId != null &&
+                product.CompanyId == _tenantContext.CompanyId);
+
+        modelBuilder.Entity<ProductBatch>()
+            .HasQueryFilter(batch =>
+                _tenantContext.CompanyId != null &&
+                batch.CompanyId == _tenantContext.CompanyId);
     }
 
 
