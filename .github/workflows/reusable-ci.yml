@@ -85,6 +85,16 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore "${{ inputs.solution-path }}"
 
+      - name: SonarQube begin
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          "${{ runner.temp }}/scanner/dotnet-sonarscanner" begin \
+            /k:"${{ inputs.sonar-project-key }}" \
+            /o:"${{ inputs.sonar-organization }}" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+
       - name: Build solution
         run: dotnet build "${{ inputs.solution-path }}" \
           --configuration Release \
@@ -97,6 +107,14 @@ jobs:
           --collect:"XPlat Code Coverage" \
           --results-directory ./TestResults \
           --logger "trx;LogFileName=test-results.trx"
+
+      - name: SonarQube end
+        if: always()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          "${{ runner.temp }}/scanner/dotnet-sonarscanner" end \
+            /d:sonar.token="$SONAR_TOKEN"
 
       - name: Upload test results
         if: always()
