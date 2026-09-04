@@ -14,4 +14,13 @@ public interface IProductService
     Task<ProductResponse?> GetProductByIdAsync(
     Guid productId,
     CancellationToken cancellationToken = default);
+
+    Task<UpdateProductResult> UpdateAsync(
+    Guid productId,
+    UpdateProductRequest request,
+    CancellationToken cancellationToken = default);
+
+    Task<DeactivateProductResult> DeactivateAsync(
+    Guid productId,
+    CancellationToken cancellationToken = default);
 }

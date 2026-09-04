@@ -106,4 +106,77 @@ public sealed class ProductsController : ControllerBase
                 statusCode: StatusCodes.Status500InternalServerError)
         };
     }
+
+    //deactivate product
+    [HttpPatch("{productId:guid}/deactivate")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<ProductResponse>> Deactivate(
+    Guid productId,
+    CancellationToken cancellationToken)
+    {
+        var result = await _productService.DeactivateAsync(
+            productId,
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            DeactivateProductOutcome.Success =>
+                Ok(result.Product),
+
+            DeactivateProductOutcome.NotFound =>
+                NotFound(new { result.Message }),
+
+            DeactivateProductOutcome.AlreadyInactive =>
+                Conflict(new { result.Message }),
+
+            DeactivateProductOutcome.TenantNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            _ => Problem(
+                title: "Product deactivation failed.",
+                statusCode: StatusCodes.Status500InternalServerError)
+        };
+    }
+
+    //update product
+    [HttpPut("{productId:guid}")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<ProductResponse>> Update(
+    Guid productId,
+    UpdateProductRequestBody body,
+    CancellationToken cancellationToken)
+    {
+        var request = new UpdateProductRequest(
+            body.Sku,
+            body.Name,
+            body.Description,
+            body.UnitOfMeasure);
+
+        var result = await _productService.UpdateAsync(
+            productId,
+            request,
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            UpdateProductOutcome.Success =>
+                Ok(result.Product),
+
+            UpdateProductOutcome.InvalidRequest =>
+                BadRequest(new { result.Message }),
+
+            UpdateProductOutcome.DuplicateSku =>
+                Conflict(new { result.Message }),
+
+            UpdateProductOutcome.NotFound =>
+                NotFound(new { result.Message }),
+
+            UpdateProductOutcome.TenantNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            _ => Problem(
+                title: "Product update failed.",
+                statusCode: StatusCodes.Status500InternalServerError)
+        };
+    }
 }

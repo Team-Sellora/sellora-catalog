@@ -252,7 +252,190 @@ public sealed class ProductService : IProductService
                 .ToArray());
     }
 
+    //update product
+    public async Task<UpdateProductResult> UpdateAsync(
+    Guid productId,
+    UpdateProductRequest request,
+    CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.CompanyId is null)
+        {
+            return UpdateProductResult.TenantNotAvailable();
+        }
 
+        var validationError = ValidateUpdateRequest(request);
+
+        if (validationError is not null)
+        {
+            return UpdateProductResult.InvalidRequest(validationError);
+        }
+
+        var product = await _dbContext.Products
+            .Include(product => product.Batches)
+            .SingleOrDefaultAsync(
+                product => product.ProductId == productId,
+                cancellationToken);
+
+        if (product is null)
+        {
+            return UpdateProductResult.NotFound(productId);
+        }
+
+        var normalizedSku = request.Sku.Trim().ToUpperInvariant();
+
+        var skuExists = await _dbContext.Products.AnyAsync(
+            otherProduct =>
+                otherProduct.ProductId != productId &&
+                otherProduct.Sku == normalizedSku,
+            cancellationToken);
+
+        if (skuExists)
+        {
+            return UpdateProductResult.DuplicateSku(normalizedSku);
+        }
+
+        product.Sku = normalizedSku;
+        product.Name = request.Name.Trim();
+        product.Description = string.IsNullOrWhiteSpace(request.Description)
+            ? null
+            : request.Description.Trim();
+        product.UnitOfMeasure = request.UnitOfMeasure.Trim();
+        product.UpdatedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+            when (exception.InnerException is PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "uq_product_company_sku"
+            })
+        {
+            _dbContext.ChangeTracker.Clear();
+            return UpdateProductResult.DuplicateSku(normalizedSku);
+        }
+
+        var response = new ProductResponse(
+            product.ProductId,
+            product.Sku,
+            product.Name,
+            product.Description,
+            product.UnitOfMeasure,
+            product.CurrentUnitPrice,
+            product.Status,
+            product.CreatedAt,
+            product.UpdatedAt,
+            product.Batches
+                .OrderBy(batch => batch.ExpiryDate)
+                .Select(batch => new ProductBatchResponse(
+                    batch.BatchId,
+                    batch.BatchCode,
+                    batch.ManufacturingDate,
+                    batch.ExpiryDate,
+                    batch.Status,
+                    batch.CreatedAt,
+                    batch.UpdatedAt))
+                .ToArray());
+
+        return UpdateProductResult.Success(response);
+    }
+
+    //deactivate product
+    public async Task<DeactivateProductResult> DeactivateAsync(
+    Guid productId,
+    CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.CompanyId is null)
+        {
+            return DeactivateProductResult.TenantNotAvailable();
+        }
+
+        var product = await _dbContext.Products
+            .Include(product => product.Batches)
+            .SingleOrDefaultAsync(
+                product => product.ProductId == productId,
+                cancellationToken);
+
+        if (product is null)
+        {
+            return DeactivateProductResult.NotFound(productId);
+        }
+
+        if (product.Status == ProductStatus.Inactive)
+        {
+            return DeactivateProductResult.AlreadyInactive(productId);
+        }
+
+        product.Status = ProductStatus.Inactive;
+        product.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var response = new ProductResponse(
+            product.ProductId,
+            product.Sku,
+            product.Name,
+            product.Description,
+            product.UnitOfMeasure,
+            product.CurrentUnitPrice,
+            product.Status,
+            product.CreatedAt,
+            product.UpdatedAt,
+            product.Batches
+                .OrderBy(batch => batch.ExpiryDate)
+                .Select(batch => new ProductBatchResponse(
+                    batch.BatchId,
+                    batch.BatchCode,
+                    batch.ManufacturingDate,
+                    batch.ExpiryDate,
+                    batch.Status,
+                    batch.CreatedAt,
+                    batch.UpdatedAt))
+                .ToArray());
+
+        return DeactivateProductResult.Success(response);
+    }
+
+    // validate update request
+    private static string? ValidateUpdateRequest(
+        UpdateProductRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Sku))
+        {
+            return "SKU is required.";
+        }
+
+        if (request.Sku.Trim().Length > 80)
+        {
+            return "SKU cannot exceed 80 characters.";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return "Product name is required.";
+        }
+
+        if (request.Name.Trim().Length > 200)
+        {
+            return "Product name cannot exceed 200 characters.";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.UnitOfMeasure))
+        {
+            return "Unit of measure is required.";
+        }
+
+        if (request.UnitOfMeasure.Trim().Length > 40)
+        {
+            return "Unit of measure cannot exceed 40 characters.";
+        }
+
+        return null;
+    }
+
+    // validate request
     private static string? ValidateRequest(CreateProductRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Sku))
