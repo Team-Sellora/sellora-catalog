@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Tenancy;
+using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
 using Sellora.CatalogService.Infrastructure.Persistence;
+using Sellora.CatalogService.Infrastructure.Products;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -50,6 +52,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
 builder.Services.AddDbContext<CatalogDbContext>(options =>
     options.UseNpgsql(connectionString));
 
+builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
