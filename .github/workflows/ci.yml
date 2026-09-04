@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: Team-Sellora/.github/.github/workflows/reusable-ci.yml@main
+    with:
+      solution-path: Sellora.CoreService.sln
+      sonar-project-key: Team-Sellora_sellora-organization
+      sonar-organization: team-sellora
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
