@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Tenancy;
+using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
+using Sellora.CatalogService.Infrastructure.Persistence;
+using Sellora.CatalogService.Infrastructure.Products;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,11 +34,39 @@ builder.Services
             ValidateIssuerSigningKey = true,
             ClockSkew = TimeSpan.FromSeconds(30)
         };
+
+        // The shared development Identity Server currently uses a certificate
+        // that is not trusted by local developer machines. This exception is
+        // deliberately limited to Development; production must use a trusted
+        // certificate and must never bypass TLS validation.
+        if (builder.Environment.IsDevelopment())
+        {
+            options.BackchannelHttpHandler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback =
+                    HttpClientHandler
+                        .DangerousAcceptAnyServerCertificateValidator
+            };
+        }
     });
 
 builder.Services.AddAuthorization(options => options.AddSelloraCatalogPolicies());
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
+
+var connectionString =
+    builder.Configuration.GetConnectionString("Default");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "The catalog database connection string is not configured.");
+}
+
+builder.Services.AddDbContext<CatalogDbContext>(options =>
+    options.UseNpgsql(connectionString));
+
+builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
