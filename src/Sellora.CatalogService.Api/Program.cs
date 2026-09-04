@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Tenancy;
 using Sellora.CatalogService.Domain.Tenancy;
+using Sellora.CatalogService.Infrastructure.Persistence;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -35,6 +37,19 @@ builder.Services
 builder.Services.AddAuthorization(options => options.AddSelloraCatalogPolicies());
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
+
+var connectionString =
+    builder.Configuration.GetConnectionString("Default");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "The catalog database connection string is not configured.");
+}
+
+builder.Services.AddDbContext<CatalogDbContext>(options =>
+    options.UseNpgsql(connectionString));
+
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
