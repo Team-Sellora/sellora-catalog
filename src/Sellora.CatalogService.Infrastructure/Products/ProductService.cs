@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Sellora.CatalogService.Application.Common;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Entities;
 using Sellora.CatalogService.Domain.Products;
@@ -21,6 +22,7 @@ public sealed class ProductService : IProductService
         _tenantContext = tenantContext;
     }
 
+    //create product
     public async Task<CreateProductResult> CreateAsync(
         CreateProductRequest request,
         CancellationToken cancellationToken = default)
@@ -147,6 +149,109 @@ public sealed class ProductService : IProductService
 
         return CreateProductResult.Success(response);
     }
+
+    //get products
+    public async Task<PagedResponse<ProductResponse>> GetProductsAsync(
+    ProductListQuery query,
+    CancellationToken cancellationToken = default)
+    {
+        var page = Math.Max(query.Page, 1);
+        var pageSize = Math.Clamp(query.PageSize, 1, 100);
+
+        var productsQuery = _dbContext.Products
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var searchPattern = $"%{query.Search.Trim()}%";
+
+            productsQuery = productsQuery.Where(product =>
+                EF.Functions.ILike(product.Name, searchPattern) ||
+                EF.Functions.ILike(product.Sku, searchPattern));
+        }
+
+        var totalCount = await productsQuery.CountAsync(cancellationToken);
+
+        var products = await productsQuery
+            .Include(product => product.Batches)
+            .OrderBy(product => product.Name)
+            .ThenBy(product => product.Sku)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var items = products
+            .Select(product => new ProductResponse(
+                product.ProductId,
+                product.Sku,
+                product.Name,
+                product.Description,
+                product.UnitOfMeasure,
+                product.CurrentUnitPrice,
+                product.Status,
+                product.CreatedAt,
+                product.UpdatedAt,
+                product.Batches
+                    .OrderBy(batch => batch.ExpiryDate)
+                    .Select(batch => new ProductBatchResponse(
+                        batch.BatchId,
+                        batch.BatchCode,
+                        batch.ManufacturingDate,
+                        batch.ExpiryDate,
+                        batch.Status,
+                        batch.CreatedAt,
+                        batch.UpdatedAt))
+                    .ToArray()))
+            .ToArray();
+
+        return new PagedResponse<ProductResponse>(
+            items,
+            page,
+            pageSize,
+            totalCount);
+    }
+
+    //get product by id
+    public async Task<ProductResponse?> GetProductByIdAsync(
+    Guid productId,
+    CancellationToken cancellationToken = default)
+    {
+        var product = await _dbContext.Products
+            .AsNoTracking()
+            .Include(product => product.Batches)
+            .SingleOrDefaultAsync(
+                product => product.ProductId == productId,
+                cancellationToken);
+
+        if (product is null)
+        {
+            return null;
+        }
+
+        return new ProductResponse(
+            product.ProductId,
+            product.Sku,
+            product.Name,
+            product.Description,
+            product.UnitOfMeasure,
+            product.CurrentUnitPrice,
+            product.Status,
+            product.CreatedAt,
+            product.UpdatedAt,
+            product.Batches
+                .OrderBy(batch => batch.ExpiryDate)
+                .Select(batch => new ProductBatchResponse(
+                    batch.BatchId,
+                    batch.BatchCode,
+                    batch.ManufacturingDate,
+                    batch.ExpiryDate,
+                    batch.Status,
+                    batch.CreatedAt,
+                    batch.UpdatedAt))
+                .ToArray());
+    }
+
 
     private static string? ValidateRequest(CreateProductRequest request)
     {

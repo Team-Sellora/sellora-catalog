@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Contracts;
+using Sellora.CatalogService.Application.Common;
 using Sellora.CatalogService.Application.Products;
 
 namespace Sellora.CatalogService.Api.Controllers;
@@ -17,6 +18,50 @@ public sealed class ProductsController : ControllerBase
         _productService = productService;
     }
 
+    //get products
+    [HttpGet]
+    [Authorize(Policy = RolePolicies.RequireCatalogReader)]
+    public async Task<ActionResult<PagedResponse<ProductResponse>>> GetProducts(
+    [FromQuery] string? search,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 20,
+    CancellationToken cancellationToken = default)
+    {
+        var query = new ProductListQuery(
+            search,
+            page,
+            pageSize);
+
+        var response = await _productService.GetProductsAsync(
+            query,
+            cancellationToken);
+
+        return Ok(response);
+    }
+
+    //get product by id
+    [HttpGet("{productId:guid}")]
+    [Authorize(Policy = RolePolicies.RequireCatalogReader)]
+    public async Task<ActionResult<ProductResponse>> GetProductById(
+    Guid productId,
+    CancellationToken cancellationToken)
+    {
+        var product = await _productService.GetProductByIdAsync(
+            productId,
+            cancellationToken);
+
+        if (product is null)
+        {
+            return NotFound(new
+            {
+                Message = $"Product '{productId}' was not found."
+            });
+        }
+
+        return Ok(product);
+    }
+
+    //create product
     [HttpPost]
     [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
     public async Task<ActionResult<ProductResponse>> Create(
