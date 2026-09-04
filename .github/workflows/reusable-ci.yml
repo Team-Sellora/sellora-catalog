@@ -96,17 +96,19 @@ jobs:
             /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
 
       - name: Build solution
-        run: dotnet build "${{ inputs.solution-path }}" \
-          --configuration Release \
-          --no-restore
+        run: |
+          dotnet build "${{ inputs.solution-path }}" \
+            --configuration Release \
+            --no-restore
 
       - name: Run tests with coverage
-        run: dotnet test "${{ inputs.solution-path }}" \
-          --configuration Release \
-          --no-build \
-          --collect:"XPlat Code Coverage" \
-          --results-directory ./TestResults \
-          --logger "trx;LogFileName=test-results.trx"
+        run: |
+          dotnet test "${{ inputs.solution-path }}" \
+            --configuration Release \
+            --no-build \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults \
+            --logger "trx;LogFileName=test-results.trx"
 
       - name: SonarQube end
         if: always()
