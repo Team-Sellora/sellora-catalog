@@ -52,16 +52,6 @@ public sealed class ProductService : IProductService
             return CreateProductResult.DuplicateSku(normalizedSku);
         }
 
-        var batchCodeExists = await _dbContext.ProductBatches.AnyAsync(
-            batch => batch.BatchCode == normalizedBatchCode,
-            cancellationToken);
-
-        if (batchCodeExists)
-        {
-            return CreateProductResult.DuplicateBatchCode(
-                normalizedBatchCode);
-        }
-
         var now = DateTimeOffset.UtcNow;
         var productId = Guid.NewGuid();
 
@@ -115,13 +105,6 @@ public sealed class ProductService : IProductService
                 return CreateProductResult.DuplicateSku(normalizedSku);
             }
 
-            if (postgresException.ConstraintName ==
-                "uq_product_batch_company_code")
-            {
-                return CreateProductResult.DuplicateBatchCode(
-                    normalizedBatchCode);
-            }
-
             throw;
         }
 
@@ -155,12 +138,20 @@ public sealed class ProductService : IProductService
     ProductListQuery query,
     CancellationToken cancellationToken = default)
     {
+        EnsureTenantAvailable();
         var page = Math.Max(query.Page, 1);
         var pageSize = Math.Clamp(query.PageSize, 1, 100);
 
         var productsQuery = _dbContext.Products
             .AsNoTracking()
             .AsQueryable();
+
+        if (!string.Equals(query.Status, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            var status = string.Equals(query.Status, ProductStatus.Inactive, StringComparison.OrdinalIgnoreCase)
+                ? ProductStatus.Inactive : ProductStatus.Active;
+            productsQuery = productsQuery.Where(product => product.Status == status);
+        }
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -217,6 +208,7 @@ public sealed class ProductService : IProductService
     Guid productId,
     CancellationToken cancellationToken = default)
     {
+        EnsureTenantAvailable();
         var product = await _dbContext.Products
             .AsNoTracking()
             .Include(product => product.Batches)
@@ -468,9 +460,10 @@ public sealed class ProductService : IProductService
             return "Unit of measure cannot exceed 40 characters.";
         }
 
-        if (request.CurrentUnitPrice <= 0)
+        if (request.CurrentUnitPrice < 0.01m || request.CurrentUnitPrice > 9999999999999999.99m ||
+            decimal.Round(request.CurrentUnitPrice, 2) != request.CurrentUnitPrice)
         {
-            return "Current unit price must be greater than zero.";
+            return "Current unit price must be between 0.01 and 9999999999999999.99 with at most two decimal places.";
         }
 
         if (string.IsNullOrWhiteSpace(request.BatchCode))
@@ -499,5 +492,11 @@ public sealed class ProductService : IProductService
         }
 
         return null;
+    }
+
+    private void EnsureTenantAvailable()
+    {
+        if (_tenantContext.CompanyId is null)
+            throw new UnauthorizedAccessException("A valid company identifier was not found in the access token.");
     }
 }

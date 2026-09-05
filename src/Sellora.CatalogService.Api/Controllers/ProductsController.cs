@@ -4,6 +4,7 @@ using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Contracts;
 using Sellora.CatalogService.Application.Common;
 using Sellora.CatalogService.Application.Products;
+using Sellora.CatalogService.Domain.Tenancy;
 
 namespace Sellora.CatalogService.Api.Controllers;
 
@@ -12,10 +13,12 @@ namespace Sellora.CatalogService.Api.Controllers;
 public sealed class ProductsController : ControllerBase
 {
     private readonly IProductService _productService;
+    private readonly ITenantContext _tenantContext;
 
-    public ProductsController(IProductService productService)
+    public ProductsController(IProductService productService, ITenantContext tenantContext)
     {
         _productService = productService;
+        _tenantContext = tenantContext;
     }
 
     //get products
@@ -25,12 +28,27 @@ public sealed class ProductsController : ControllerBase
     [FromQuery] string? search,
     [FromQuery] int page = 1,
     [FromQuery] int pageSize = 20,
+    [FromQuery] string status = "Active",
     CancellationToken cancellationToken = default)
     {
+        if (_tenantContext.CompanyId is null)
+            return Unauthorized(new { Message = "A valid company identifier was not found in the access token." });
+
+        var normalizedStatus = status.Trim().ToLowerInvariant() switch
+        {
+            "active" => "Active",
+            "inactive" => "Inactive",
+            "all" => "All",
+            _ => null
+        };
+        if (normalizedStatus is null)
+            return BadRequest(new { Message = "Status must be Active, Inactive, or All." });
+
         var query = new ProductListQuery(
             search,
             page,
-            pageSize);
+            pageSize,
+            normalizedStatus);
 
         var response = await _productService.GetProductsAsync(
             query,
@@ -46,6 +64,9 @@ public sealed class ProductsController : ControllerBase
     Guid productId,
     CancellationToken cancellationToken)
     {
+        if (_tenantContext.CompanyId is null)
+            return Unauthorized(new { Message = "A valid company identifier was not found in the access token." });
+
         var product = await _productService.GetProductByIdAsync(
             productId,
             cancellationToken);
@@ -96,9 +117,6 @@ public sealed class ProductsController : ControllerBase
                 Unauthorized(new { result.Message }),
 
             CreateProductOutcome.DuplicateSku =>
-                Conflict(new { result.Message }),
-
-            CreateProductOutcome.DuplicateBatchCode =>
                 Conflict(new { result.Message }),
 
             _ => Problem(

@@ -71,10 +71,11 @@ public class ProductBatchConfiguration
         builder.HasIndex(batch => new
         {
             batch.CompanyId,
+            batch.ProductId,
             batch.BatchCode
         })
         .IsUnique()
-        .HasDatabaseName("uq_product_batch_company_code");
+        .HasDatabaseName("uq_product_batch_company_product_code");
 
         builder.HasOne(batch => batch.Product)
             .WithMany(product => product.Batches)

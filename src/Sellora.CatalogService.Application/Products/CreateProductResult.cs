@@ -5,7 +5,6 @@ public enum CreateProductOutcome
     Success,
     InvalidRequest,
     DuplicateSku,
-    DuplicateBatchCode,
     TenantNotAvailable
 }
 
@@ -43,11 +42,6 @@ public sealed class CreateProductResult
         new(
             CreateProductOutcome.DuplicateSku,
             $"A product with SKU '{sku}' already exists in your company.");
-
-    public static CreateProductResult DuplicateBatchCode(string batchCode) =>
-        new(
-            CreateProductOutcome.DuplicateBatchCode,
-            $"A batch with code '{batchCode}' already exists in your company.");
 
     public static CreateProductResult TenantNotAvailable() =>
         new(
