@@ -3,7 +3,6 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,20 +13,16 @@ using Sellora.CatalogService.Infrastructure.Persistence;
 
 namespace Sellora.CatalogService.Tests;
 
-public sealed class CatalogApiFactory : WebApplicationFactory<Program>
+public sealed class CatalogApiFactory(string connectionString) : WebApplicationFactory<Program>
 {
-    private readonly SqliteConnection _connection = new("Data Source=:memory:");
-
-    public CatalogApiFactory() => _connection.Open();
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
-        builder.UseSetting("ConnectionStrings:Default", "Host=unused;Database=unused");
+        builder.UseSetting("ConnectionStrings:Default", connectionString);
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<CatalogDbContext>>();
-            services.AddDbContext<CatalogDbContext>(options => options.UseSqlite(_connection));
+            services.AddDbContext<CatalogDbContext>(options => options.UseNpgsql(connectionString));
             services.AddAuthentication(options =>
             {
                 options.DefaultAuthenticateScheme = "Test";
@@ -40,18 +35,11 @@ public sealed class CatalogApiFactory : WebApplicationFactory<Program>
     public HttpClient Client(string? companyId, string role = "CompanyAdmin")
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
-        using var scope = Services.CreateScope();
-        scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.EnsureCreated();
         if (companyId is not null) client.DefaultRequestHeaders.Add("X-Test-Company", companyId);
         client.DefaultRequestHeaders.Add("X-Test-Role", role);
         return client;
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        base.Dispose(disposing);
-        if (disposing) _connection.Dispose();
-    }
 }
 
 public sealed class TestAuthenticationHandler(

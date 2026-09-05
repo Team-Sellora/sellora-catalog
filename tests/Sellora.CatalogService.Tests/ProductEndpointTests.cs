@@ -6,8 +6,34 @@ using Xunit;
 
 namespace Sellora.CatalogService.Tests;
 
-public sealed class ProductEndpointTests
+public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) : IClassFixture<PostgreSqlConstraintFixture>
 {
+    [Theory]
+    [InlineData("tEsT pRoDuCt")]
+    [InlineData("sKu-SeArCh")]
+    public async Task Search_matches_name_and_sku_case_insensitively_with_status_paging_and_tenant_isolation(string search)
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        using var otherTenant = factory.Client(Guid.NewGuid().ToString());
+        var first = await Create(client, "SKU-SEARCH-1");
+        await Create(client, "SKU-SEARCH-2");
+        var inactive = await Create(client, "SKU-SEARCH-3");
+        await Create(otherTenant, "SKU-SEARCH-OTHER");
+        Assert.Equal(HttpStatusCode.OK, (await client.PatchAsync($"/api/products/{inactive.ProductId}/deactivate", null)).StatusCode);
+
+        var url = $"/api/products?search={Uri.EscapeDataString(search)}&pageSize=1";
+        var result = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>(url);
+        Assert.Equal(2, result!.TotalCount);
+        Assert.Equal(first.ProductId, Assert.Single(result.Items).ProductId);
+        var all = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>(url + "&status=All");
+        Assert.Equal(3, all!.TotalCount);
+        var inactiveResult = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>(url + "&status=Inactive");
+        Assert.Equal(inactive.ProductId, Assert.Single(inactiveResult!.Items).ProductId);
+        var missing = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?search=no-match");
+        Assert.Empty(missing!.Items);
+    }
+
     private static CreateProductRequest Request(string sku = "SKU-1", decimal price = 12.34m) =>
         new(sku, "Test product", "Description", "Each", price, "BATCH-1", new(2026, 1, 1), new(2027, 1, 1));
 
@@ -21,7 +47,7 @@ public sealed class ProductEndpointTests
     [Fact]
     public async Task Deactivation_hides_default_list_but_preserves_history_and_filtered_paging()
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString());
         var first = await Create(client);
         await Create(client, "SKU-2");
@@ -46,7 +72,7 @@ public sealed class ProductEndpointTests
     [InlineData("not-a-guid")]
     public async Task Missing_or_malformed_tenant_returns_401_on_every_endpoint(string? tenant)
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(tenant);
         var id = Guid.NewGuid();
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/products")).StatusCode);
@@ -65,7 +91,7 @@ public sealed class ProductEndpointTests
     [InlineData("10000000000000000")]
     public async Task Unrepresentable_prices_return_400_without_writing(string price)
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString());
         var response = await client.PostAsJsonAsync("/api/products", Request(price: decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture)));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -79,7 +105,7 @@ public sealed class ProductEndpointTests
     [InlineData("9999999999999999.99")]
     public async Task Representable_prices_are_accepted(string price)
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString());
         var value = decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture);
         var response = await client.PostAsJsonAsync("/api/products", Request(price: value));
@@ -90,7 +116,7 @@ public sealed class ProductEndpointTests
     [Fact]
     public async Task Sku_is_unique_per_tenant_and_batch_codes_can_be_reused_across_products()
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var a = factory.Client(Guid.NewGuid().ToString());
         using var b = factory.Client(Guid.NewGuid().ToString());
         var product = await Create(a);
@@ -110,7 +136,7 @@ public sealed class ProductEndpointTests
     [InlineData("SalesRep")]
     public async Task Readers_cannot_write(string role)
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString(), role);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/products")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/products", Request())).StatusCode);
@@ -121,7 +147,7 @@ public sealed class ProductEndpointTests
     [Fact]
     public async Task Invalid_status_and_dates_are_rejected_and_update_preserves_price()
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString());
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/products?status=invalid")).StatusCode);
         var invalid = Request() with { ExpiryDate = new(2025, 1, 1) };

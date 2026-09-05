@@ -1,4 +1,5 @@
-using Microsoft.Data.Sqlite;
+using Npgsql;
+using Testcontainers.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -18,10 +19,14 @@ public sealed class BatchMigrationTests
     [Fact]
     public async Task Migration_preserves_data_allows_cross_product_codes_and_rejects_same_product_duplicates()
     {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
+        await using var database = new PostgreSqlBuilder("postgres:16")
+            .WithDatabase("catalog_migration_tests")
+            .WithUsername("sellora_test")
+            .WithPassword("sellora_test_password")
+            .Build();
+        await database.StartAsync();
         var tenant = new Tenant(Guid.NewGuid());
-        using var db = new CatalogDbContext(new DbContextOptionsBuilder<CatalogDbContext>().UseSqlite(connection).Options, tenant);
+        using var db = new CatalogDbContext(new DbContextOptionsBuilder<CatalogDbContext>().UseNpgsql(database.GetConnectionString()).Options, tenant);
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync("20260904051529_InitialCatalogSchema");
         var service = new ProductService(db, tenant);
@@ -39,7 +44,10 @@ public sealed class BatchMigrationTests
             ManufacturingDate = new(2026, 1, 1), ExpiryDate = new(2027, 1, 1),
             CreatedAt = DateTimeOffset.UtcNow
         });
-        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        var postgres = Assert.IsType<PostgresException>(exception.InnerException);
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, postgres.SqlState);
+        Assert.Equal("uq_product_batch_company_product_code", postgres.ConstraintName);
     }
 
     [Fact]
@@ -57,7 +65,7 @@ public sealed class BatchMigrationTests
     public async Task Service_reads_without_tenant_fail_explicitly()
     {
         using var db = new CatalogDbContext(new DbContextOptionsBuilder<CatalogDbContext>()
-            .UseSqlite("Data Source=:memory:").Options, new Tenant(null));
+            .UseNpgsql("Host=unused;Database=unused").Options, new Tenant(null));
         var service = new ProductService(db, new Tenant(null));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetProductsAsync(new ProductListQuery(null)));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetProductByIdAsync(Guid.NewGuid()));
