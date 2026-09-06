@@ -157,6 +157,9 @@ public sealed class ProductsController : ControllerBase
             ChangeProductPriceOutcome.TenantNotAvailable =>
                 Unauthorized(new { result.Message }),
 
+            ChangeProductPriceOutcome.UserNotAvailable =>
+                Unauthorized(new { result.Message }),
+
             _ => Problem(
                 title: "Product price change failed.",
                 statusCode: StatusCodes.Status500InternalServerError)

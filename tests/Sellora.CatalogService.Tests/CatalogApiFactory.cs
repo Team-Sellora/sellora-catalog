@@ -37,13 +37,17 @@ public sealed class CatalogApiFactory : WebApplicationFactory<Program>
         });
     }
 
-    public HttpClient Client(string? companyId, string role = "CompanyAdmin")
+    public HttpClient Client(
+        string? companyId,
+        string role = "CompanyAdmin",
+        string? subject = "test-user")
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
         using var scope = Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.EnsureCreated();
         if (companyId is not null) client.DefaultRequestHeaders.Add("X-Test-Company", companyId);
         client.DefaultRequestHeaders.Add("X-Test-Role", role);
+        if (subject is not null) client.DefaultRequestHeaders.Add("X-Test-Subject", subject);
         return client;
     }
 
@@ -63,11 +67,9 @@ public sealed class TestAuthenticationHandler(
     {
         if (!Request.Headers.TryGetValue("X-Test-Role", out var role))
             return Task.FromResult(AuthenticateResult.NoResult());
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.Role, role.ToString()),
-            new("sub", "test-user")
-        };
+        var claims = new List<Claim> { new(ClaimTypes.Role, role.ToString()) };
+        if (Request.Headers.TryGetValue("X-Test-Subject", out var subject))
+            claims.Add(new Claim("sub", subject.ToString()));
         if (Request.Headers.TryGetValue("X-Test-Company", out var company))
             claims.Add(new Claim("companyId", company.ToString()));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));

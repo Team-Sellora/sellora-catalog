@@ -1,8 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Sellora.CatalogService.Api.Contracts;
 using Sellora.CatalogService.Application.Common;
 using Sellora.CatalogService.Application.Products;
+using Sellora.CatalogService.Infrastructure.Persistence;
 using Xunit;
 
 namespace Sellora.CatalogService.Tests;
@@ -187,6 +190,18 @@ public sealed class ProductEndpointTests
         Assert.NotNull(updated);
         Assert.Equal(25.50m, updated.CurrentUnitPrice);
         Assert.NotNull(updated.UpdatedAt);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var history = await db.ProductPriceHistory
+            .IgnoreQueryFilters()
+            .SingleAsync();
+
+        Assert.Equal(product.ProductId, history.ProductId);
+        Assert.Equal(product.CurrentUnitPrice, history.OldUnitPrice);
+        Assert.Equal(25.50m, history.NewUnitPrice);
+        Assert.Equal("test-user", history.ChangedBy);
+        Assert.Equal("Supplier price increase", history.Reason);
     }
 
     [Fact]
@@ -212,6 +227,12 @@ public sealed class ProductEndpointTests
 
         Assert.NotNull(unchanged);
         Assert.Equal(product.CurrentUnitPrice, unchanged.CurrentUnitPrice);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        Assert.Empty(await db.ProductPriceHistory
+            .IgnoreQueryFilters()
+            .ToListAsync());
     }
 
     [Fact]
@@ -237,6 +258,31 @@ public sealed class ProductEndpointTests
 
         Assert.Equal(HttpStatusCode.BadRequest, missingReasonResponse.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, pastDateResponse.StatusCode);
+
+        var unchanged = await client.GetFromJsonAsync<ProductResponse>(
+            $"/api/products/{product.ProductId}");
+
+        Assert.NotNull(unchanged);
+        Assert.Equal(product.CurrentUnitPrice, unchanged.CurrentUnitPrice);
+    }
+
+    [Fact]
+    public async Task Price_change_without_user_subject_is_rejected()
+    {
+        using var factory = new CatalogApiFactory();
+        using var client = factory.Client(
+            Guid.NewGuid().ToString(),
+            subject: null);
+        var product = await Create(client);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                "Price update",
+                DateTimeOffset.UtcNow.AddMinutes(5)));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var unchanged = await client.GetFromJsonAsync<ProductResponse>(
             $"/api/products/{product.ProductId}");

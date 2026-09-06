@@ -344,9 +344,15 @@ public sealed class ProductService : IProductService
         ChangeProductPriceRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (_tenantContext.CompanyId is null)
+        if (_tenantContext.CompanyId is not Guid companyId)
         {
             return ChangeProductPriceResult.TenantNotAvailable();
+        }
+
+        var changedBy = _currentUserContext.Subject;
+        if (string.IsNullOrWhiteSpace(changedBy))
+        {
+            return ChangeProductPriceResult.UserNotAvailable();
         }
 
         var validationError = ValidatePriceChangeRequest(request);
@@ -367,8 +373,24 @@ public sealed class ProductService : IProductService
             return ChangeProductPriceResult.NotFound(productId);
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var history = new ProductPriceHistory
+        {
+            PriceHistoryId = Guid.NewGuid(),
+            CompanyId = companyId,
+            ProductId = product.ProductId,
+            OldUnitPrice = product.CurrentUnitPrice,
+            NewUnitPrice = request.NewUnitPrice,
+            ChangedBy = changedBy,
+            Reason = request.Reason.Trim(),
+            ChangedAt = now,
+            EffectiveFrom = request.EffectiveFrom,
+            Product = product
+        };
+
         product.CurrentUnitPrice = request.NewUnitPrice;
-        product.UpdatedAt = DateTimeOffset.UtcNow;
+        product.UpdatedAt = now;
+        _dbContext.ProductPriceHistory.Add(history);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 

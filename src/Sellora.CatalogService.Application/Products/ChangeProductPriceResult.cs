@@ -5,7 +5,8 @@ public enum ChangeProductPriceOutcome
     Success,
     InvalidRequest,
     NotFound,
-    TenantNotAvailable
+    TenantNotAvailable,
+    UserNotAvailable
 }
 
 public sealed class ChangeProductPriceResult
@@ -44,4 +45,9 @@ public sealed class ChangeProductPriceResult
         new(
             ChangeProductPriceOutcome.TenantNotAvailable,
             "A valid company identifier was not found in the access token.");
+
+    public static ChangeProductPriceResult UserNotAvailable() =>
+        new(
+            ChangeProductPriceOutcome.UserNotAvailable,
+            "A valid user identifier was not found in the access token.");
 }
