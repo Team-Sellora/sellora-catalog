@@ -66,10 +66,7 @@ public sealed class BatchMigrationTests
     {
         using var db = new CatalogDbContext(new DbContextOptionsBuilder<CatalogDbContext>()
             .UseNpgsql("Host=unused;Database=unused").Options, new Tenant(null));
-        var service = new ProductService(
-            db,
-            new Tenant(null),
-            new CurrentUser("test-user"));
+        var service = new ProductService(db, new Tenant(null));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetProductsAsync(new ProductListQuery(null)));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetProductByIdAsync(Guid.NewGuid()));
     }
