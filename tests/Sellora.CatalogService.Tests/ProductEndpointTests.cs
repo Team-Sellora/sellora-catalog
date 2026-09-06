@@ -313,6 +313,13 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
                 " ",
                 DateTimeOffset.UtcNow.AddMinutes(5)));
 
+        var nullReasonResponse = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                null,
+                DateTimeOffset.UtcNow.AddMinutes(5)));
+
         var pastDateResponse = await client.PutAsJsonAsync(
             $"/api/products/{product.ProductId}/price",
             new ChangeProductPriceRequestBody(
@@ -321,6 +328,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
                 DateTimeOffset.UtcNow.AddMinutes(-5)));
 
         Assert.Equal(HttpStatusCode.BadRequest, missingReasonResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, nullReasonResponse.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, pastDateResponse.StatusCode);
 
         var unchanged = await client.GetFromJsonAsync<ProductResponse>(

@@ -384,7 +384,7 @@ public sealed class ProductService : IProductService
             OldUnitPrice = product.CurrentUnitPrice,
             NewUnitPrice = request.NewUnitPrice,
             ChangedBy = changedBy,
-            Reason = request.Reason.Trim(),
+            Reason = request.Reason!.Trim(),
             ChangedAt = now,
             EffectiveFrom = request.EffectiveFrom,
             Product = product
@@ -517,7 +517,7 @@ public sealed class ProductService : IProductService
             return "A reason for the price change is required.";
         }
 
-        if (request.Reason.Trim().Length > 500)
+        if (request.Reason!.Trim().Length > 500)
         {
             return "The price-change reason cannot exceed 500 characters.";
         }

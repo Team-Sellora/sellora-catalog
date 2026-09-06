@@ -69,7 +69,6 @@ Apply migration `20260905180000_ScopeBatchCodesToProduct` before deploying this 
 Apply `20260906121212_AddProductPriceHistory` and
 `20260906124412_AddCatalogOutbox` before deploying the price-change workflow.
 
-The tests exercise HTTP responses, role restrictions, tenant isolation, product lifecycle, price validation, and batch-code migration/constraints using SQLite. They also verify the PostgreSQL migration script and model snapshot; live PostgreSQL execution is a separate deployment check.
 The service applies pending EF Core migrations at startup before serving requests, matching Organization. The `Testing` environment skips this startup step because the PostgreSQL fixtures apply migrations themselves. Migration `20260905180000_ScopeBatchCodesToProduct` replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
 
 The tests use `Testcontainers.PostgreSql` 4.14.0 and the `postgres:16` Docker image, matching Organization's PostgreSQL constraint-test fixture. API and database tests run against isolated PostgreSQL containers with the real EF Core migrations applied. They cover case-insensitive name/SKU search, HTTP responses, role restrictions, tenant isolation, product lifecycle, price validation, database rounding/check constraints, and batch-code migration/uniqueness. SQLite and `EnsureCreated()` are not used.

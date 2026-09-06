@@ -2,5 +2,5 @@ namespace Sellora.CatalogService.Application.Products;
 
 public sealed record ChangeProductPriceRequest(
     decimal NewUnitPrice,
-    string Reason,
+    string? Reason,
     DateTimeOffset EffectiveFrom);
