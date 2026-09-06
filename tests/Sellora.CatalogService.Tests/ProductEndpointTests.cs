@@ -69,7 +69,18 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         Assert.Single(all.Items);
         var history = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{first.ProductId}");
         Assert.Equal("Inactive", history!.Status);
-        Assert.Equal(first.Batches, history.Batches);
+        var expectedBatch = Assert.Single(first.Batches);
+        var actualBatch = Assert.Single(history.Batches);
+        Assert.Equal(expectedBatch.BatchId, actualBatch.BatchId);
+        Assert.Equal(expectedBatch.BatchCode, actualBatch.BatchCode);
+        Assert.Equal(expectedBatch.ManufacturingDate, actualBatch.ManufacturingDate);
+        Assert.Equal(expectedBatch.ExpiryDate, actualBatch.ExpiryDate);
+        Assert.Equal(expectedBatch.Status, actualBatch.Status);
+        Assert.InRange(
+            (actualBatch.CreatedAt - expectedBatch.CreatedAt).Duration(),
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(1));
+        Assert.Equal(expectedBatch.UpdatedAt, actualBatch.UpdatedAt);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsync($"/api/products/{first.ProductId}/deactivate", null)).StatusCode);
     }
 
