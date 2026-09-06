@@ -51,6 +51,12 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         using var client = factory.Client(Guid.NewGuid().ToString());
         var first = await Create(client);
         await Create(client, "SKU-2");
+        // Compare persisted values on both sides: PostgreSQL stores timestamps
+        // at microsecond precision, unlike the in-memory creation response.
+        var beforeDeactivation = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{first.ProductId}");
+        Assert.NotNull(beforeDeactivation);
+        Assert.Equal("Active", beforeDeactivation.Status);
+        Assert.Single(beforeDeactivation.Batches);
         Assert.Equal(HttpStatusCode.OK, (await client.PatchAsync($"/api/products/{first.ProductId}/deactivate", null)).StatusCode);
         var active = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?pageSize=1");
         Assert.Equal(1, active!.TotalCount);
@@ -63,7 +69,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         Assert.Single(all.Items);
         var history = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{first.ProductId}");
         Assert.Equal("Inactive", history!.Status);
-        Assert.Equal(first.Batches, history.Batches);
+        Assert.Equal(beforeDeactivation.Batches, history.Batches);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsync($"/api/products/{first.ProductId}/deactivate", null)).StatusCode);
     }
 
