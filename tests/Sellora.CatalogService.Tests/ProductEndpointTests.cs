@@ -51,6 +51,10 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         using var client = factory.Client(Guid.NewGuid().ToString());
         var first = await Create(client);
         await Create(client, "SKU-2");
+        // Use persisted timestamps on both sides of the history comparison.
+        var beforeDeactivation = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{first.ProductId}");
+        Assert.NotNull(beforeDeactivation);
+        Assert.Single(beforeDeactivation.Batches);
         Assert.Equal(HttpStatusCode.OK, (await client.PatchAsync($"/api/products/{first.ProductId}/deactivate", null)).StatusCode);
         var active = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?pageSize=1");
         Assert.Equal(1, active!.TotalCount);
@@ -63,7 +67,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         Assert.Single(all.Items);
         var history = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{first.ProductId}");
         Assert.Equal("Inactive", history!.Status);
-        Assert.Equal(first.Batches, history.Batches);
+        Assert.Equal(beforeDeactivation.Batches, history.Batches);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsync($"/api/products/{first.ProductId}/deactivate", null)).StatusCode);
     }
 
@@ -161,3 +165,4 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         Assert.Equal(product.CurrentUnitPrice, updated.CurrentUnitPrice);
     }
 }
+
