@@ -38,9 +38,17 @@ The service owns its database. `companyId` is an opaque identifier obtained from
 - Initial prices must fit `numeric(18,2)`: 0.01 through 9999999999999999.99, with at most two decimal places. Invalid prices return 400 rather than being rounded by the database.
 - SKUs are unique per company. Batch codes are unique per company and product, allowing different products to share a batch code.
 
-Apply migration `20260905180000_ScopeBatchCodesToProduct` before deploying this version to an existing database. It replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
+The service applies pending EF Core migrations at startup before serving requests, matching Organization. The `Testing` environment skips this startup step because the PostgreSQL fixtures apply migrations themselves. Migration `20260905180000_ScopeBatchCodesToProduct` replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
 
-The tests exercise HTTP responses, role restrictions, tenant isolation, product lifecycle, price validation, and batch-code migration/constraints using SQLite. They also verify the PostgreSQL migration script and model snapshot; live PostgreSQL execution is a separate deployment check.
+The tests use `Testcontainers.PostgreSql` 4.14.0 and the `postgres:16` Docker image, matching Organization's PostgreSQL constraint-test fixture. API and database tests run against isolated PostgreSQL containers with the real EF Core migrations applied. They cover case-insensitive name/SKU search, HTTP responses, role restrictions, tenant isolation, product lifecycle, price validation, database rounding/check constraints, and batch-code migration/uniqueness. SQLite and `EnsureCreated()` are not used.
+
+### Running database tests
+
+Start Docker Desktop (Linux containers) or another compatible Docker daemon before running `dotnet test`. Testcontainers pulls `postgres:16` if needed, starts temporary containers on automatically assigned ports, applies migrations, and removes the containers after the tests. The first run needs network access to pull the image. Tests fail if Docker is unavailable; they do not silently fall back to SQLite.
+
+The development database remains separate: `docker compose up -d` starts `catalog_db` on port 5434 with a persistent volume, while Organization uses port 5433. Tests do not use or modify either development database.
+
+The default local connection string matches Docker Compose: localhost port 5434, database `catalog_db`, and the Compose development account. Start the database before starting the API; the API applies migrations automatically. For hosted environments, supply `ConnectionStrings__Default` through environment configuration with the appropriate database credentials.
 
 ## Local commands
 
