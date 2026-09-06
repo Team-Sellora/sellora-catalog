@@ -37,7 +37,7 @@ jobs:
       - name: Deploy to production
         uses: azure/webapps-deploy@v3
         with:
-          app-name: sellora-organization
+          app-name: sellora-catalog
           publish-profile: ${{ secrets.AZURE_WEBAPP_PRODUCTION_PUBLISH_PROFILE }}
           package: ./publish
 
