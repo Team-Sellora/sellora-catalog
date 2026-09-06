@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: Team-Sellora/.github/.github/workflows/reusable-ci.yml@main
+    uses: ./.github/workflows/reusable-ci.yml
     with:
       solution-path: Sellora.CoreService.sln
       sonar-project-key: Team-Sellora_sellora-organization

@@ -1,0 +1,78 @@
+name: CD - Deploy Staging
+
+on:
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Deploy to Azure staging
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.403
+
+      - name: Publish application
+        run: |
+          dotnet restore Sellora.CoreService.sln
+          dotnet publish \
+            src/Sellora.CoreService.Api/Sellora.CoreService.Api.csproj \
+            --configuration Release \
+            --output ./publish \
+            --no-self-contained
+
+          test -f ./publish/Sellora.CoreService.Api.dll
+          test -f ./publish/Sellora.CoreService.Api.runtimeconfig.json
+
+          cd ./publish
+          zip -r ../publish.zip .
+
+      - name: Deploy to staging slot
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: sellora-organization
+          slot-name: staging
+          publish-profile: ${{ secrets.AZURE_STAGING_PUBLISH_PROFILE }}
+          package: ./publish.zip
+
+      - name: Validate deployed app startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEALTH_URL="https://sellora-catalog-staging-gta7d7chfyfpe7dd.southeastasia-01.azurewebsites.net/health"
+          WHOAMI_URL="https://sellora-catalog-staging-gta7d7chfyfpe7dd.southeastasia-01.azurewebsites.net/whoami"
+
+          for attempt in {1..12}; do
+            HEALTH_STATUS=$(curl \
+              --silent \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              "$HEALTH_URL" || true)
+
+            WHOAMI_STATUS=$(curl \
+              --silent \
+              --output /tmp/whoami-response.txt \
+              --write-out "%{http_code}" \
+              "$WHOAMI_URL" || true)
+
+            if [ "$HEALTH_STATUS" = "200" ] && { [ "$WHOAMI_STATUS" = "200" ] || [ "$WHOAMI_STATUS" = "401" ]; }; then
+              echo "Startup validation passed: /health=200 and /whoami responded with ${WHOAMI_STATUS}"
+              exit 0
+            fi
+
+            echo "Attempt $attempt -> /health=${HEALTH_STATUS}, /whoami=${WHOAMI_STATUS}"
+            sleep 10
+          done
+
+          echo "Deployment validation failed: app did not start with expected runtime configuration"
+          exit 1
