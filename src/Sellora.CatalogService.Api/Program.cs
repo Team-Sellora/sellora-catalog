@@ -39,7 +39,7 @@ builder.Services
         // that is not trusted by local developer machines. This exception is
         // deliberately limited to Development; production must use a trusted
         // certificate and must never bypass TLS validation.
-        if (builder.Environment.IsDevelopment())
+        if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
         {
             options.BackchannelHttpHandler = new HttpClientHandler
             {
