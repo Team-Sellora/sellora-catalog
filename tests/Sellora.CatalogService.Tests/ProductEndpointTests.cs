@@ -1,9 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Sellora.CatalogService.Api.Contracts;
 using Sellora.CatalogService.Application.Common;
+using Sellora.CatalogService.Application.Events;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Infrastructure.Persistence;
 using Xunit;
@@ -202,6 +204,22 @@ public sealed class ProductEndpointTests
         Assert.Equal(25.50m, history.NewUnitPrice);
         Assert.Equal("test-user", history.ChangedBy);
         Assert.Equal("Supplier price increase", history.Reason);
+
+        var outbox = await db.OutboxMessages
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        Assert.Equal("PriceChanged", outbox.EventType);
+        Assert.Equal("1.0", outbox.SchemaVersion);
+        Assert.Equal(product.ProductId, outbox.AggregateId);
+        Assert.Null(outbox.PublishedAt);
+
+        var priceChanged = JsonSerializer.Deserialize<PriceChangedEvent>(
+            outbox.Payload,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(priceChanged);
+        Assert.Equal(product.CurrentUnitPrice, priceChanged.OldUnitPrice);
+        Assert.Equal(25.50m, priceChanged.NewUnitPrice);
+        Assert.Equal("test-user", priceChanged.ChangedBy);
     }
 
     [Fact]
@@ -231,6 +249,9 @@ public sealed class ProductEndpointTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
         Assert.Empty(await db.ProductPriceHistory
+            .IgnoreQueryFilters()
+            .ToListAsync());
+        Assert.Empty(await db.OutboxMessages
             .IgnoreQueryFilters()
             .ToListAsync());
     }

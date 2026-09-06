@@ -38,7 +38,36 @@ The service owns its database. `companyId` is an opaque identifier obtained from
 - Initial prices must fit `numeric(18,2)`: 0.01 through 9999999999999999.99, with at most two decimal places. Invalid prices return 400 rather than being rounded by the database.
 - SKUs are unique per company. Batch codes are unique per company and product, allowing different products to share a batch code.
 
+## PriceChanged event
+
+An accepted price change writes one `PriceChanged` outbox message in the same
+database transaction as the product update and price-history entry. The relay
+publishes pending messages to `sellora.catalog.v1` and retries failed publishes.
+
+Kafka message key: the product ID. Headers include `event-id`, `event-type`,
+`schema-version`, and `company-id`. Consumers must deduplicate by `event-id`
+because an outbox relay provides at-least-once delivery across a database and
+Kafka failure boundary.
+
+Schema version `1.0` payload fields:
+
+```json
+{
+  "companyId": "uuid",
+  "productId": "uuid",
+  "oldUnitPrice": 250.00,
+  "newUnitPrice": 275.00,
+  "changedBy": "authenticated-user-subject",
+  "reason": "Supplier price increase",
+  "changedAt": "2026-09-06T12:00:00Z",
+  "effectiveFrom": "2026-09-06T12:05:00Z"
+}
+```
+
 Apply migration `20260905180000_ScopeBatchCodesToProduct` before deploying this version to an existing database. It replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
+
+Apply `20260906121212_AddProductPriceHistory` and
+`20260906124412_AddCatalogOutbox` before deploying the price-change workflow.
 
 The tests exercise HTTP responses, role restrictions, tenant isolation, product lifecycle, price validation, and batch-code migration/constraints using SQLite. They also verify the PostgreSQL migration script and model snapshot; live PostgreSQL execution is a separate deployment check.
 
