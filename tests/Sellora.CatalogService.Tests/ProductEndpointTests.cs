@@ -197,7 +197,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
     [Fact]
     public async Task Company_admin_can_change_product_price()
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString());
         var product = await Create(client);
 
@@ -223,7 +223,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
         var history = await db.ProductPriceHistory
             .IgnoreQueryFilters()
-            .SingleAsync();
+            .SingleAsync(item => item.ProductId == product.ProductId);
 
         Assert.Equal(product.ProductId, history.ProductId);
         Assert.Equal(product.CurrentUnitPrice, history.OldUnitPrice);
@@ -233,7 +233,9 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
 
         var outbox = await db.OutboxMessages
             .IgnoreQueryFilters()
-            .SingleAsync();
+            .SingleAsync(item =>
+                item.AggregateId == product.ProductId &&
+                item.EventType == "PriceChanged");
         Assert.Equal("PriceChanged", outbox.EventType);
         Assert.Equal("1.0", outbox.SchemaVersion);
         Assert.Equal(product.ProductId, outbox.AggregateId);
@@ -251,7 +253,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
     [Fact]
     public async Task Invalid_price_change_is_rejected_without_updating_product()
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString());
         var product = await Create(client);
 
@@ -276,16 +278,20 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
         Assert.Empty(await db.ProductPriceHistory
             .IgnoreQueryFilters()
+            .Where(item => item.ProductId == product.ProductId)
             .ToListAsync());
         Assert.Empty(await db.OutboxMessages
             .IgnoreQueryFilters()
+            .Where(item =>
+                item.AggregateId == product.ProductId &&
+                item.EventType == "PriceChanged")
             .ToListAsync());
     }
 
     [Fact]
     public async Task Price_change_requires_reason_and_non_past_effective_date()
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(Guid.NewGuid().ToString());
         var product = await Create(client);
 
@@ -316,7 +322,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
     [Fact]
     public async Task Price_change_without_user_subject_is_rejected()
     {
-        using var factory = new CatalogApiFactory();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
         using var client = factory.Client(
             Guid.NewGuid().ToString(),
             subject: null);
