@@ -92,8 +92,7 @@ var app = builder.Build();
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
 
-// Match Organization: apply version-controlled migrations before serving requests.
-// Test fixtures apply migrations to their isolated PostgreSQL containers.
+// Match Organization; test fixtures migrate their isolated databases themselves.
 if (!app.Environment.IsEnvironment("Testing"))
 {
     await using var scope = app.Services.CreateAsyncScope();

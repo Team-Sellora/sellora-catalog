@@ -71,15 +71,14 @@ Apply `20260906121212_AddProductPriceHistory` and
 
 The service applies pending EF Core migrations at startup before serving requests, matching Organization. The `Testing` environment skips this startup step because the PostgreSQL fixtures apply migrations themselves. Migration `20260905180000_ScopeBatchCodesToProduct` replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
 
-The tests use `Testcontainers.PostgreSql` 4.14.0 and the `postgres:16` Docker image, matching Organization's PostgreSQL constraint-test fixture. API and database tests run against isolated PostgreSQL containers with the real EF Core migrations applied. They cover case-insensitive name/SKU search, HTTP responses, role restrictions, tenant isolation, product lifecycle, price validation, database rounding/check constraints, and batch-code migration/uniqueness. SQLite and `EnsureCreated()` are not used.
+Apply `20260906121212_AddProductPriceHistory` and
+`20260906124412_AddCatalogOutbox` before deploying the price-change workflow.
 
-### Running database tests
+API and database tests use Testcontainers.PostgreSql 4.14.0 with `postgres:16`, matching Organization's PostgreSQL fixture. Start Docker Desktop in Linux-container mode before running tests. Testcontainers downloads the image when needed, applies real migrations to temporary databases, and removes its containers afterward. Tests cover search, tenant isolation, price history and outbox persistence, database constraints, and migrations; no SQLite fallback is used.
 
-Start Docker Desktop (Linux containers) or another compatible Docker daemon before running `dotnet test`. Testcontainers pulls `postgres:16` if needed, starts temporary containers on automatically assigned ports, applies migrations, and removes the containers after the tests. The first run needs network access to pull the image. Tests fail if Docker is unavailable; they do not silently fall back to SQLite.
+The API applies pending migrations at startup, except in `Testing`, where fixtures apply them. Local configuration matches Docker Compose (`catalog_db` on port 5434). Start the development database before the API. Hosted environments must override `ConnectionStrings__Default`. Existing data from a different local database is not transferred automatically.
 
-The development database remains separate: `docker compose up -d` starts `catalog_db` on port 5434 with a persistent volume, while Organization uses port 5433. Tests do not use or modify either development database.
-
-The default local connection string matches Docker Compose: localhost port 5434, database `catalog_db`, and the Compose development account. Start the database before starting the API; the API applies migrations automatically. For hosted environments, supply `ConnectionStrings__Default` through environment configuration with the appropriate database credentials.
+Run tests with coverage using `dotnet test -c Release --collect "XPlat Code Coverage"`.
 
 ## Local commands
 
