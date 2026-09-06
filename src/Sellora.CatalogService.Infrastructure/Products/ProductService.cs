@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Text.Json;
 using Sellora.CatalogService.Application.Common;
+using Sellora.CatalogService.Application.Events;
 using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Entities;
@@ -391,6 +393,30 @@ public sealed class ProductService : IProductService
         product.CurrentUnitPrice = request.NewUnitPrice;
         product.UpdatedAt = now;
         _dbContext.ProductPriceHistory.Add(history);
+
+        var priceChanged = new PriceChangedEvent(
+            companyId,
+            product.ProductId,
+            history.OldUnitPrice,
+            history.NewUnitPrice,
+            history.ChangedBy,
+            history.Reason,
+            history.ChangedAt,
+            history.EffectiveFrom);
+
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            OutboxId = Guid.NewGuid(),
+            CompanyId = companyId,
+            AggregateId = product.ProductId,
+            EventType = "PriceChanged",
+            SchemaVersion = "1.0",
+            Payload = JsonSerializer.Serialize(
+                priceChanged,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            OccurredAt = now,
+            NextAttemptAt = now
+        });
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
