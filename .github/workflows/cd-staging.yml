@@ -24,15 +24,15 @@ jobs:
 
       - name: Publish application
         run: |
-          dotnet restore Sellora.CoreService.sln
+          dotnet restore Sellora.CatalogService.sln
           dotnet publish \
-            src/Sellora.CoreService.Api/Sellora.CoreService.Api.csproj \
+            src/Sellora.CatalogService.Api/Sellora.CatalogService.Api.csproj \
             --configuration Release \
             --output ./publish \
             --no-self-contained
 
-          test -f ./publish/Sellora.CoreService.Api.dll
-          test -f ./publish/Sellora.CoreService.Api.runtimeconfig.json
+          test -f ./publish/Sellora.CatalogService.Api.dll
+          test -f ./publish/Sellora.CatalogService.Api.runtimeconfig.json
 
           cd ./publish
           zip -r ../publish.zip .
