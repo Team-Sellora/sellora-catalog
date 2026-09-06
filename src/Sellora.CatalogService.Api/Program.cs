@@ -84,9 +84,9 @@ if (!app.Environment.IsEnvironment("Testing"))
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
     await db.Database.MigrateAsync();
-}
 
-if (app.Environment.IsDevelopment())
+}
+if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
