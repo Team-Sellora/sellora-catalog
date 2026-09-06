@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Sellora.CatalogService.Application.Common;
+using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Entities;
 using Sellora.CatalogService.Domain.Products;
@@ -13,13 +14,16 @@ public sealed class ProductService : IProductService
 {
     private readonly CatalogDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
+    private readonly ICurrentUserContext _currentUserContext;
 
     public ProductService(
         CatalogDbContext dbContext,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ICurrentUserContext currentUserContext)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
+        _currentUserContext = currentUserContext;
     }
 
     //create product

@@ -63,7 +63,11 @@ public sealed class TestAuthenticationHandler(
     {
         if (!Request.Headers.TryGetValue("X-Test-Role", out var role))
             return Task.FromResult(AuthenticateResult.NoResult());
-        var claims = new List<Claim> { new(ClaimTypes.Role, role.ToString()) };
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Role, role.ToString()),
+            new("sub", "test-user")
+        };
         if (Request.Headers.TryGetValue("X-Test-Company", out var company))
             claims.Add(new Claim("companyId", company.ToString()));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));

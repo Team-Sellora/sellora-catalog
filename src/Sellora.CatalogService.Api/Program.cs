@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
+using Sellora.CatalogService.Api.Identity;
 using Sellora.CatalogService.Api.Tenancy;
+using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
 using Sellora.CatalogService.Infrastructure.Persistence;
@@ -53,6 +55,7 @@ builder.Services
 builder.Services.AddAuthorization(options => options.AddSelloraCatalogPolicies());
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
+builder.Services.AddScoped<ICurrentUserContext, HttpCurrentUserContext>();
 
 var connectionString =
     builder.Configuration.GetConnectionString("Default");
