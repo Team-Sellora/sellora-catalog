@@ -97,6 +97,9 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
+app.MapGet("/whoami", (HttpContext context) =>
+    Results.Ok(context.User.Claims.Select(c => new { c.Type, c.Value })))
+    .RequireAuthorization();
 
 app.Run();
 
