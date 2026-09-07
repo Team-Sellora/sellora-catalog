@@ -38,6 +38,8 @@ The service owns its database. `companyId` is an opaque identifier obtained from
 - Initial prices must fit `numeric(18,2)`: 0.01 through 9999999999999999.99, with at most two decimal places. Invalid prices return 400 rather than being rounded by the database.
 - SKUs are unique per company. Batch codes are unique per company and product, allowing different products to share a batch code.
 
+In the Staging environment, the service seeds five active products for Organization's `SELLORA-DEMO` company after applying migrations. The seed is idempotent, and it never runs in Development, Testing, or Production.
+
 The service applies pending EF Core migrations at startup before serving requests, matching Organization. The `Testing` environment skips this startup step because the PostgreSQL fixtures apply migrations themselves. Migration `20260905180000_ScopeBatchCodesToProduct` replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
 
 Apply `20260906121212_AddProductPriceHistory` and

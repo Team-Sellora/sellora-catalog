@@ -6,6 +6,7 @@ using Sellora.CatalogService.Api.Tenancy;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
 using Sellora.CatalogService.Infrastructure.Persistence;
+using Sellora.CatalogService.Infrastructure.Persistence.Seeding;
 using Sellora.CatalogService.Infrastructure.Products;
 using Serilog;
 
@@ -70,6 +71,24 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
+
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins);
+        }
+
+        policy.AllowAnyHeader().AllowAnyMethod();
+    });
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -84,6 +103,11 @@ if (!app.Environment.IsEnvironment("Testing"))
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
     await db.Database.MigrateAsync();
+
+    if (app.Environment.IsStaging())
+    {
+        await DevelopmentCatalogSeeder.SeedAsync(db);
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -93,6 +117,10 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Run CORS before authentication so browser preflight requests are accepted.
+app.UseCors();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
