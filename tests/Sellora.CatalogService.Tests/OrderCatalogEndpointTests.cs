@@ -358,6 +358,91 @@ public sealed class OrderCatalogEndpointTests(
     }
 
     [Fact]
+    public async Task Product_update_invalidates_cache_before_next_order_lookup()
+    {
+        var companyId = Guid.NewGuid();
+
+        using var factory =
+            new CatalogApiFactory(database.ConnectionString);
+
+        using var companyAdmin =
+            factory.Client(companyId.ToString());
+
+        using var internalClient =
+            CreateInternalClient(factory);
+
+        var product = await CreateProduct(
+            companyAdmin,
+            "CACHE-PRODUCT",
+            25m);
+
+        var resolveRequest = new ResolveProductsRequestBody(
+            companyId,
+            new[] { product.ProductId });
+
+        var firstResponse =
+            await internalClient.PostAsJsonAsync(
+                "/internal/catalog/products/resolve",
+                resolveRequest);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            firstResponse.StatusCode);
+
+        var firstResult =
+            await firstResponse.Content.ReadFromJsonAsync<
+                ProductResolutionResponse>();
+
+        var cachedProduct = Assert.Single(
+            firstResult!.Items);
+
+        Assert.Equal(
+            "Product CACHE-PRODUCT",
+            cachedProduct.Name);
+
+        var updateResponse =
+            await companyAdmin.PutAsJsonAsync(
+                $"/api/products/{product.ProductId}",
+                new UpdateProductRequestBody(
+                    "CACHE-PRODUCT-UPDATED",
+                    "Updated cached product",
+                    "Updated description",
+                    "Box"));
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            updateResponse.StatusCode);
+
+        var secondResponse =
+            await internalClient.PostAsJsonAsync(
+                "/internal/catalog/products/resolve",
+                resolveRequest);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            secondResponse.StatusCode);
+
+        var secondResult =
+            await secondResponse.Content.ReadFromJsonAsync<
+                ProductResolutionResponse>();
+
+        var refreshedProduct = Assert.Single(
+            secondResult!.Items);
+
+        Assert.Equal(
+            "CACHE-PRODUCT-UPDATED",
+            refreshedProduct.Sku);
+
+        Assert.Equal(
+            "Updated cached product",
+            refreshedProduct.Name);
+
+        Assert.Equal(
+            "Box",
+            refreshedProduct.UnitOfMeasure);
+    }
+
+    [Fact]
     public async Task Price_change_invalidates_cache_before_next_order_lookup()
     {
         var companyId = Guid.NewGuid();
