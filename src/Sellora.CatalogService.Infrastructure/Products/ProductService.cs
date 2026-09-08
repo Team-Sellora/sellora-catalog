@@ -386,7 +386,7 @@ public sealed class ProductService : IProductService
             ChangedBy = changedBy,
             Reason = request.Reason!.Trim(),
             ChangedAt = now,
-            EffectiveFrom = request.EffectiveFrom,
+            EffectiveFrom = request.EffectiveFrom.ToUniversalTime(),
             Product = product
         };
 
@@ -443,6 +443,43 @@ public sealed class ProductService : IProductService
                 .ToArray());
 
         return ChangeProductPriceResult.Success(response);
+    }
+
+    public async Task<IReadOnlyCollection<PriceHistoryResponse>?> GetPriceHistoryAsync(
+        Guid productId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.CompanyId is null)
+        {
+            throw new UnauthorizedAccessException(
+                "A valid company identifier was not found in the access token.");
+        }
+
+        var productExists = await _dbContext.Products
+            .AsNoTracking()
+            .AnyAsync(product => product.ProductId == productId, cancellationToken);
+
+        if (!productExists)
+        {
+            return null;
+        }
+
+        return await _dbContext.ProductPriceHistory
+            .AsNoTracking()
+            .Where(history => history.ProductId == productId)
+            .OrderByDescending(history => history.ChangedAt)
+            .ThenByDescending(history => history.EffectiveFrom)
+            .ThenByDescending(history => history.PriceHistoryId)
+            .Select(history => new PriceHistoryResponse(
+                history.PriceHistoryId,
+                history.ProductId,
+                history.OldUnitPrice,
+                history.NewUnitPrice,
+                history.ChangedBy,
+                history.Reason,
+                history.ChangedAt,
+                history.EffectiveFrom))
+            .ToArrayAsync(cancellationToken);
     }
 
     //deactivate product
@@ -527,7 +564,7 @@ public sealed class ProductService : IProductService
             return "Effective date is required.";
         }
 
-        if (request.EffectiveFrom < DateTimeOffset.UtcNow)
+        if (request.EffectiveFrom.ToUniversalTime() < DateTimeOffset.UtcNow)
         {
             return "Effective date cannot be in the past.";
         }

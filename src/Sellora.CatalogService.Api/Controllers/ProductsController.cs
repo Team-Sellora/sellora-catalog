@@ -166,6 +166,35 @@ public sealed class ProductsController : ControllerBase
         };
     }
 
+    [HttpGet("{productId:guid}/price-history")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<IReadOnlyCollection<PriceHistoryResponse>>> GetPriceHistory(
+        Guid productId,
+        CancellationToken cancellationToken)
+    {
+        if (_tenantContext.CompanyId is null)
+        {
+            return Unauthorized(new
+            {
+                Message = "A valid company identifier was not found in the access token."
+            });
+        }
+
+        var history = await _productService.GetPriceHistoryAsync(
+            productId,
+            cancellationToken);
+
+        if (history is null)
+        {
+            return NotFound(new
+            {
+                Message = $"Product '{productId}' was not found."
+            });
+        }
+
+        return Ok(history);
+    }
+
     //deactivate product
     [HttpPatch("{productId:guid}/deactivate")]
     [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]

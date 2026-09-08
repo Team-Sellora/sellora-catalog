@@ -21,9 +21,13 @@ public interface IProductService
     CancellationToken cancellationToken = default);
 
     Task<ChangeProductPriceResult> ChangePriceAsync(
-    Guid productId,
-    ChangeProductPriceRequest request,
-    CancellationToken cancellationToken = default);
+        Guid productId,
+        ChangeProductPriceRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyCollection<PriceHistoryResponse>?> GetPriceHistoryAsync(
+        Guid productId,
+        CancellationToken cancellationToken = default);
 
     Task<DeactivateProductResult> DeactivateAsync(
     Guid productId,

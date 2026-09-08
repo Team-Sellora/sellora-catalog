@@ -355,5 +355,93 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         Assert.NotNull(unchanged);
         Assert.Equal(product.CurrentUnitPrice, unchanged.CurrentUnitPrice);
     }
+
+    [Fact]
+    public async Task Price_history_returns_append_only_changes_newest_first()
+    {
+        var companyId = Guid.NewGuid();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(companyId.ToString());
+        var product = await Create(client);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                "First change",
+                DateTimeOffset.UtcNow.AddMinutes(5)))).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                25m,
+                "Second change",
+                DateTimeOffset.UtcNow.AddMinutes(10)))).StatusCode);
+
+        var history = await client.GetFromJsonAsync<PriceHistoryResponse[]>(
+            $"/api/products/{product.ProductId}/price-history");
+
+        Assert.NotNull(history);
+        Assert.Equal(2, history.Length);
+        Assert.Equal(25m, history[0].NewUnitPrice);
+        Assert.Equal(20m, history[0].OldUnitPrice);
+        Assert.Equal(20m, history[1].NewUnitPrice);
+        Assert.Equal(product.CurrentUnitPrice, history[1].OldUnitPrice);
+        Assert.True(history[0].ChangedAt >= history[1].ChangedAt);
+    }
+
+    [Fact]
+    public async Task Price_history_rows_cannot_be_changed_or_deleted()
+    {
+        var companyId = Guid.NewGuid();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(companyId.ToString());
+        var product = await Create(client);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                "Audited change",
+                DateTimeOffset.UtcNow.AddMinutes(5)))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var history = await db.ProductPriceHistory
+            .IgnoreQueryFilters()
+            .SingleAsync(item => item.ProductId == product.ProductId);
+
+        history.Reason = "Attempted rewrite";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.SaveChangesAsync());
+        Assert.Contains("append-only", error.Message);
+
+        db.Entry(history).State = EntityState.Deleted;
+        error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.SaveChangesAsync());
+        Assert.Contains("append-only", error.Message);
+    }
+
+    [Fact]
+    public async Task Price_history_is_company_admin_only_and_tenant_scoped()
+    {
+        var companyId = Guid.NewGuid();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var admin = factory.Client(companyId.ToString());
+        var product = await Create(admin);
+
+        using var otherTenant = factory.Client(Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.NotFound, (await otherTenant.GetAsync(
+            $"/api/products/{product.ProductId}/price-history")).StatusCode);
+
+        using var salesRep = factory.Client(companyId.ToString(), "SalesRep");
+        Assert.Equal(HttpStatusCode.Forbidden, (await salesRep.GetAsync(
+            $"/api/products/{product.ProductId}/price-history")).StatusCode);
+
+        using var noTenant = factory.Client(null);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await noTenant.GetAsync(
+            $"/api/products/{product.ProductId}/price-history")).StatusCode);
+    }
 }
 
