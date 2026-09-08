@@ -1,6 +1,6 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using System.Text.Json;
 using Sellora.CatalogService.Application.Common;
 using Sellora.CatalogService.Application.Events;
 using Sellora.CatalogService.Application.Identity;
@@ -17,15 +17,18 @@ public sealed class ProductService : IProductService
     private readonly CatalogDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserContext _currentUserContext;
+    private readonly IProductPriceCache _productPriceCache;
 
     public ProductService(
         CatalogDbContext dbContext,
         ITenantContext tenantContext,
-        ICurrentUserContext currentUserContext)
+        ICurrentUserContext currentUserContext,
+        IProductPriceCache productPriceCache)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
         _currentUserContext = currentUserContext;
+        _productPriceCache = productPriceCache;
     }
 
     //create product
@@ -256,7 +259,7 @@ public sealed class ProductService : IProductService
     UpdateProductRequest request,
     CancellationToken cancellationToken = default)
     {
-        if (_tenantContext.CompanyId is null)
+        if (_tenantContext.CompanyId is not Guid companyId)
         {
             return UpdateProductResult.TenantNotAvailable();
         }
@@ -314,6 +317,8 @@ public sealed class ProductService : IProductService
             _dbContext.ChangeTracker.Clear();
             return UpdateProductResult.DuplicateSku(normalizedSku);
         }
+
+        _productPriceCache.Remove(companyId, productId);
 
         var response = new ProductResponse(
             product.ProductId,
@@ -420,6 +425,8 @@ public sealed class ProductService : IProductService
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        _productPriceCache.Remove(companyId, productId);
+
         var response = new ProductResponse(
             product.ProductId,
             product.Sku,
@@ -487,7 +494,7 @@ public sealed class ProductService : IProductService
     Guid productId,
     CancellationToken cancellationToken = default)
     {
-        if (_tenantContext.CompanyId is null)
+        if (_tenantContext.CompanyId is not Guid companyId)
         {
             return DeactivateProductResult.TenantNotAvailable();
         }
@@ -512,6 +519,8 @@ public sealed class ProductService : IProductService
         product.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        _productPriceCache.Remove(companyId, productId);
 
         var response = new ProductResponse(
             product.ProductId,

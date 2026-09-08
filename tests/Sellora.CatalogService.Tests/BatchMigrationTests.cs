@@ -1,14 +1,14 @@
-using Npgsql;
-using Testcontainers.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql;
 using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Entities;
 using Sellora.CatalogService.Domain.Tenancy;
 using Sellora.CatalogService.Infrastructure.Persistence;
 using Sellora.CatalogService.Infrastructure.Products;
+using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace Sellora.CatalogService.Tests;
@@ -17,6 +17,29 @@ public sealed class BatchMigrationTests
 {
     private sealed record Tenant(Guid? CompanyId) : ITenantContext;
     private sealed record CurrentUser(string? Subject) : ICurrentUserContext;
+
+    private sealed class NoOpProductPriceCache : IProductPriceCache
+    {
+        public bool TryGet(
+            Guid companyId,
+            Guid productId,
+            out ProductForOrderResponse? product)
+        {
+            product = null;
+            return false;
+        }
+
+        public void Set(
+            Guid companyId,
+            Guid productId,
+            ProductForOrderResponse product)
+        {
+        }
+
+        public void Remove(Guid companyId, Guid productId)
+        {
+        }
+    }
 
     [Fact]
     public async Task Migration_preserves_data_allows_cross_product_codes_and_rejects_same_product_duplicates()
@@ -28,13 +51,17 @@ public sealed class BatchMigrationTests
             .Build();
         await database.StartAsync();
         var tenant = new Tenant(Guid.NewGuid());
+
         using var db = new CatalogDbContext(new DbContextOptionsBuilder<CatalogDbContext>().UseNpgsql(database.GetConnectionString()).Options, tenant);
         var migrator = db.GetService<IMigrator>();
+
         await migrator.MigrateAsync("20260904051529_InitialCatalogSchema");
         var service = new ProductService(
             db,
             tenant,
-            new CurrentUser("test-user"));
+            new CurrentUser("test-user"),
+            new NoOpProductPriceCache());
+
         var request = new CreateProductRequest("SKU-1", "Name", null, "Each", 1m, "BATCH", new(2026, 1, 1), new(2027, 1, 1));
         var original = await service.CreateAsync(request);
         Assert.True(original.IsSuccess);
@@ -77,7 +104,9 @@ public sealed class BatchMigrationTests
         var service = new ProductService(
             db,
             new Tenant(null),
-            new CurrentUser("test-user"));
+            new CurrentUser("test-user"),
+            new NoOpProductPriceCache());
+
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetProductsAsync(new ProductListQuery(null)));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetProductByIdAsync(Guid.NewGuid()));
     }
