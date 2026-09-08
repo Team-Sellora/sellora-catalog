@@ -212,4 +212,82 @@ public sealed class OrderCatalogEndpointTests(
         return (await response.Content
             .ReadFromJsonAsync<ProductResponse>())!;
     }
+
+    [Fact]
+    public async Task Price_change_invalidates_cache_before_next_order_lookup()
+    {
+        var companyId = Guid.NewGuid();
+
+        using var factory =
+            new CatalogApiFactory(database.ConnectionString);
+
+        using var companyAdmin =
+            factory.Client(companyId.ToString());
+
+        using var internalClient =
+            CreateInternalClient(factory);
+
+        var product = await CreateProduct(
+            companyAdmin,
+            "CACHE-PRICE",
+            25m);
+
+        var resolveRequest = new ResolveProductsRequestBody(
+            companyId,
+            new[] { product.ProductId });
+
+        var firstResponse =
+            await internalClient.PostAsJsonAsync(
+                "/internal/catalog/products/resolve",
+                resolveRequest);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            firstResponse.StatusCode);
+
+        var firstResult =
+            await firstResponse.Content.ReadFromJsonAsync<
+                ProductResolutionResponse>();
+
+        var firstProduct = Assert.Single(
+            firstResult!.Items);
+
+        Assert.Equal(
+            25m,
+            firstProduct.CurrentUnitPrice);
+
+        var priceChangeResponse =
+            await companyAdmin.PutAsJsonAsync(
+                $"/api/products/{product.ProductId}/price",
+                new ChangeProductPriceRequestBody(
+                    35m,
+                    "Cache invalidation test",
+                    DateTimeOffset.UtcNow.AddMinutes(5)));
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            priceChangeResponse.StatusCode);
+
+        var secondResponse =
+            await internalClient.PostAsJsonAsync(
+                "/internal/catalog/products/resolve",
+                resolveRequest);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            secondResponse.StatusCode);
+
+        var secondResult =
+            await secondResponse.Content.ReadFromJsonAsync<
+                ProductResolutionResponse>();
+
+        var refreshedProduct = Assert.Single(
+            secondResult!.Items);
+
+        Assert.Equal(
+            35m,
+            refreshedProduct.CurrentUnitPrice);
+
+        Assert.True(refreshedProduct.IsAvailable);
+    }
 }
