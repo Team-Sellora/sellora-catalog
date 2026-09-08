@@ -162,6 +162,82 @@ public sealed class OrderCatalogEndpointTests(
             correctKeyResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task Rep_catalogue_returns_only_active_unexpired_company_products()
+    {
+        var companyId = Guid.NewGuid();
+        var otherCompanyId = Guid.NewGuid();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        using var factory =
+            new CatalogApiFactory(database.ConnectionString);
+
+        using var companyAdmin =
+            factory.Client(companyId.ToString());
+
+        using var otherCompanyAdmin =
+            factory.Client(otherCompanyId.ToString());
+
+        var availableProduct = await CreateProduct(
+            companyAdmin,
+            "CATALOGUE-AVAILABLE",
+            20m);
+
+        var inactiveProduct = await CreateProduct(
+            companyAdmin,
+            "CATALOGUE-INACTIVE",
+            30m);
+
+        await CreateProduct(
+            companyAdmin,
+            "CATALOGUE-EXPIRED",
+            40m,
+            today.AddYears(-2),
+            today.AddDays(-1));
+
+        await CreateProduct(
+            otherCompanyAdmin,
+            "CATALOGUE-OTHER-COMPANY",
+            50m);
+
+        var deactivateResponse =
+            await companyAdmin.PatchAsync(
+                $"/api/products/{inactiveProduct.ProductId}/deactivate",
+                null);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            deactivateResponse.StatusCode);
+
+        using var salesRep = factory.Client(
+            companyId.ToString(),
+            "SalesRep");
+
+        var response = await salesRep.GetAsync(
+            "/api/products/catalogue?search=CATALOGUE");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var products =
+            await response.Content.ReadFromJsonAsync<
+                OrderCatalogueProductResponse[]>();
+
+        Assert.NotNull(products);
+
+        var product = Assert.Single(products);
+
+        Assert.Equal(
+            availableProduct.ProductId,
+            product.ProductId);
+
+        Assert.Equal(
+            availableProduct.CurrentUnitPrice,
+            product.CurrentUnitPrice);
+
+        Assert.True(
+            product.EarliestExpiryDate >= today);
+    }
+
     private static HttpClient CreateInternalClient(
         CatalogApiFactory factory,
         string? apiKey =
@@ -186,9 +262,11 @@ public sealed class OrderCatalogEndpointTests(
     }
 
     private static async Task<ProductResponse> CreateProduct(
-        HttpClient client,
-        string sku,
-        decimal price)
+     HttpClient client,
+     string sku,
+     decimal price,
+     DateOnly? manufacturingDate = null,
+     DateOnly? expiryDate = null)
     {
         var today =
             DateOnly.FromDateTime(DateTime.UtcNow);
@@ -202,8 +280,8 @@ public sealed class OrderCatalogEndpointTests(
                 "Each",
                 price,
                 $"BATCH-{sku}",
-                today.AddDays(-1),
-                today.AddYears(1)));
+                manufacturingDate ?? today.AddDays(-1),
+                expiryDate ?? today.AddYears(1)));
 
         Assert.Equal(
             HttpStatusCode.Created,
