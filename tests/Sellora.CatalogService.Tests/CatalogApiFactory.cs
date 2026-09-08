@@ -15,10 +15,13 @@ namespace Sellora.CatalogService.Tests;
 
 public sealed class CatalogApiFactory(string connectionString) : WebApplicationFactory<Program>
 {
+    public const string TestInternalApiKey = "sellora-integration-test-internal-key";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Default", connectionString);
+        builder.UseSetting("InternalApi:ApiKey", TestInternalApiKey);
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<CatalogDbContext>>();

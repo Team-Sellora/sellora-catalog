@@ -44,7 +44,7 @@ public sealed class BatchMigrationTests
     [Fact]
     public async Task Migration_preserves_data_allows_cross_product_codes_and_rejects_same_product_duplicates()
     {
-        await using var database = new PostgreSqlBuilder("postgres:16")
+        await using var database = new PostgreSqlBuilder("postgres:16-alpine")
             .WithDatabase("catalog_migration_tests")
             .WithUsername("sellora_test")
             .WithPassword("sellora_test_password")
