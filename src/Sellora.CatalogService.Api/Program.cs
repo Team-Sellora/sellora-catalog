@@ -23,22 +23,25 @@ builder.Host.UseSerilog((context, configuration) => configuration
     .WriteTo.Console());
 
 var jwt = builder.Configuration.GetSection("Jwt");
+var audiences = jwt.GetSection("Audience").Get<string[]>()
+    ?? new[] { jwt["Audience"]! };
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.Authority = jwt["Authority"];
         options.MetadataAddress = jwt["MetadataAddress"]!;
-        options.Audience = jwt["Audience"];
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidIssuer = jwt["Issuer"],
             ValidateAudience = true,
-            ValidAudience = jwt["Audience"],
+            ValidAudiences = audiences,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ClockSkew = TimeSpan.FromSeconds(30)
+            ClockSkew = TimeSpan.FromSeconds(30),
+            RoleClaimType = "roles",
         };
 
         // The shared development Identity Server currently uses a certificate
