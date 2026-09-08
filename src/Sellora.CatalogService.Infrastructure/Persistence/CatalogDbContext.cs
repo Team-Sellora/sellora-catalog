@@ -22,6 +22,35 @@ public class CatalogDbContext : DbContext
         Set<ProductPriceHistory>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
+    public override int SaveChanges()
+    {
+        EnsurePriceHistoryIsAppendOnly();
+        return base.SaveChanges();
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        EnsurePriceHistoryIsAppendOnly();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        EnsurePriceHistoryIsAppendOnly();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        EnsurePriceHistoryIsAppendOnly();
+        return base.SaveChangesAsync(
+            acceptAllChangesOnSuccess,
+            cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -50,5 +79,16 @@ public class CatalogDbContext : DbContext
                 message.CompanyId == _tenantContext.CompanyId);
     }
 
+    private void EnsurePriceHistoryIsAppendOnly()
+    {
+        var attemptedMutation = ChangeTracker
+            .Entries<ProductPriceHistory>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted);
 
+        if (attemptedMutation)
+        {
+            throw new InvalidOperationException(
+                "Product price history is append-only and cannot be changed or deleted.");
+        }
+    }
 }
