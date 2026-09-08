@@ -386,7 +386,7 @@ public sealed class ProductService : IProductService
             ChangedBy = changedBy,
             Reason = request.Reason!.Trim(),
             ChangedAt = now,
-            EffectiveFrom = request.EffectiveFrom,
+            EffectiveFrom = request.EffectiveFrom.ToUniversalTime(),
             Product = product
         };
 
@@ -527,7 +527,7 @@ public sealed class ProductService : IProductService
             return "Effective date is required.";
         }
 
-        if (request.EffectiveFrom < DateTimeOffset.UtcNow)
+        if (request.EffectiveFrom.ToUniversalTime() < DateTimeOffset.UtcNow)
         {
             return "Effective date cannot be in the past.";
         }
