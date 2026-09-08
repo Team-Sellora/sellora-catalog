@@ -8,10 +8,10 @@ using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Outbox;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
+using Sellora.CatalogService.Infrastructure.Outbox;
 using Sellora.CatalogService.Infrastructure.Persistence;
 using Sellora.CatalogService.Infrastructure.Persistence.Seeding;
 using Sellora.CatalogService.Infrastructure.Products;
-using Sellora.CatalogService.Infrastructure.Outbox;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -73,6 +73,19 @@ builder.Services.AddDbContext<CatalogDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IProductService, ProductService>();
+
+builder.Services.Configure<ProductPriceCacheOptions>(
+    builder.Configuration.GetSection(
+        ProductPriceCacheOptions.SectionName));
+
+builder.Services.AddSingleton<
+    IProductPriceCache,
+    ProductPriceCache>();
+
+builder.Services.AddScoped<
+    IOrderCatalogService,
+    OrderCatalogService>();
+
 builder.Services.Configure<KafkaOptions>(
     builder.Configuration.GetSection(KafkaOptions.SectionName));
 builder.Services.Configure<OutboxRelayOptions>(
