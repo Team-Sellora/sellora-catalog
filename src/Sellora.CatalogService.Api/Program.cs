@@ -9,6 +9,7 @@ using Sellora.CatalogService.Application.Outbox;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
 using Sellora.CatalogService.Infrastructure.Persistence;
+using Sellora.CatalogService.Infrastructure.Persistence.Seeding;
 using Sellora.CatalogService.Infrastructure.Products;
 using Sellora.CatalogService.Infrastructure.Outbox;
 using Serilog;
@@ -43,7 +44,7 @@ builder.Services
         // that is not trusted by local developer machines. This exception is
         // deliberately limited to Development; production must use a trusted
         // certificate and must never bypass TLS validation.
-        if (builder.Environment.IsDevelopment())
+        if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
         {
             options.BackchannelHttpHandler = new HttpClientHandler
             {
@@ -84,6 +85,24 @@ if (!builder.Environment.IsEnvironment("Testing"))
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
+
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins);
+        }
+
+        policy.AllowAnyHeader().AllowAnyMethod();
+    });
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -98,6 +117,11 @@ if (!app.Environment.IsEnvironment("Testing"))
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
     await db.Database.MigrateAsync();
+
+    if (app.Environment.IsStaging())
+    {
+        await DevelopmentCatalogSeeder.SeedAsync(db);
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -107,10 +131,17 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Run CORS before authentication so browser preflight requests are accepted.
+app.UseCors();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
+app.MapGet("/whoami", (HttpContext context) =>
+    Results.Ok(context.User.Claims.Select(c => new { c.Type, c.Value })))
+    .RequireAuthorization();
 
 app.Run();
 
