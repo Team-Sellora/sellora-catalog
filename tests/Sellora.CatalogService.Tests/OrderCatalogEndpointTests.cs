@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using Sellora.CatalogService.Api.Contracts;
@@ -114,6 +115,71 @@ public sealed class OrderCatalogEndpointTests(
         Assert.Equal(
             "ProductNotFound",
             missing.UnavailableReason);
+    }
+
+    [Fact]
+    public async Task Five_product_batch_resolves_within_latency_budget()
+    {
+        var companyId = Guid.NewGuid();
+
+        using var factory =
+            new CatalogApiFactory(database.ConnectionString);
+
+        using var companyAdmin =
+            factory.Client(companyId.ToString());
+
+        var products = new List<ProductResponse>();
+
+        for (var index = 1; index <= 5; index++)
+        {
+            products.Add(await CreateProduct(
+                companyAdmin,
+                $"LATENCY-{index}",
+                10m + index));
+        }
+
+        using var internalClient =
+            CreateInternalClient(factory);
+
+        var request = new ResolveProductsRequestBody(
+            companyId,
+            products
+                .Select(product => product.ProductId)
+                .ToArray());
+
+        var stopwatch = Stopwatch.StartNew();
+
+        var response = await internalClient.PostAsJsonAsync(
+            "/internal/catalog/products/resolve",
+            request);
+
+        stopwatch.Stop();
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            response.StatusCode);
+
+        var result =
+            await response.Content.ReadFromJsonAsync<
+                ProductResolutionResponse>();
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Items.Count);
+        Assert.All(
+            result.Items,
+            product => Assert.True(product.IsAvailable));
+
+        var latencyBudget = TimeSpan.FromSeconds(1);
+
+        Assert.True(
+            stopwatch.Elapsed < latencyBudget,
+            $"Five-product resolution took " +
+            $"{stopwatch.Elapsed.TotalMilliseconds:F2} ms; " +
+            $"budget is {latencyBudget.TotalMilliseconds:F0} ms.");
+
+        Console.WriteLine(
+            $"Five-product batch latency: " +
+            $"{stopwatch.Elapsed.TotalMilliseconds:F2} ms.");
     }
 
     [Fact]
