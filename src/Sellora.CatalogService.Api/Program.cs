@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Identity;
+using Sellora.CatalogService.Api.Security;
 using Sellora.CatalogService.Api.Tenancy;
 using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Outbox;
@@ -78,6 +79,10 @@ builder.Services.Configure<ProductPriceCacheOptions>(
     builder.Configuration.GetSection(
         ProductPriceCacheOptions.SectionName));
 
+builder.Services.Configure<InternalApiOptions>(
+    builder.Configuration.GetSection(
+        InternalApiOptions.SectionName));
+
 builder.Services.AddSingleton<
     IProductPriceCache,
     ProductPriceCache>();
@@ -147,7 +152,7 @@ app.UseHttpsRedirection();
 
 // Run CORS before authentication so browser preflight requests are accepted.
 app.UseCors();
-
+app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
