@@ -1,0 +1,215 @@
+using System.Net;
+using System.Net.Http.Json;
+using Sellora.CatalogService.Api.Contracts;
+using Sellora.CatalogService.Application.Products;
+using Xunit;
+
+namespace Sellora.CatalogService.Tests;
+
+public sealed class OrderCatalogEndpointTests(
+    PostgreSqlConstraintFixture database)
+    : IClassFixture<PostgreSqlConstraintFixture>
+{
+    [Fact]
+    public async Task Batch_resolution_returns_prices_and_unavailable_markers()
+    {
+        var companyId = Guid.NewGuid();
+        var otherCompanyId = Guid.NewGuid();
+
+        using var factory =
+            new CatalogApiFactory(database.ConnectionString);
+
+        using var companyAdmin =
+            factory.Client(companyId.ToString());
+
+        using var otherCompanyAdmin =
+            factory.Client(otherCompanyId.ToString());
+
+        var availableProduct = await CreateProduct(
+            companyAdmin,
+            "ORDER-AVAILABLE",
+            25m);
+
+        var inactiveProduct = await CreateProduct(
+            companyAdmin,
+            "ORDER-INACTIVE",
+            30m);
+
+        var otherCompanyProduct = await CreateProduct(
+            otherCompanyAdmin,
+            "ORDER-OTHER-COMPANY",
+            40m);
+
+        var deactivateResponse = await companyAdmin.PatchAsync(
+            $"/api/products/{inactiveProduct.ProductId}/deactivate",
+            null);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            deactivateResponse.StatusCode);
+
+        var missingProductId = Guid.NewGuid();
+
+        using var internalClient =
+            CreateInternalClient(factory);
+
+        var response = await internalClient.PostAsJsonAsync(
+            "/internal/catalog/products/resolve",
+            new ResolveProductsRequestBody(
+                companyId,
+                new[]
+                {
+                    availableProduct.ProductId,
+                    inactiveProduct.ProductId,
+                    otherCompanyProduct.ProductId,
+                    missingProductId
+                }));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result =
+            await response.Content.ReadFromJsonAsync<
+                ProductResolutionResponse>();
+
+        Assert.NotNull(result);
+        Assert.Equal(4, result.Items.Count);
+
+        var available = Assert.Single(
+            result.Items,
+            item =>
+                item.ProductId ==
+                availableProduct.ProductId);
+
+        Assert.True(available.IsAvailable);
+        Assert.Equal(25m, available.CurrentUnitPrice);
+        Assert.Null(available.UnavailableReason);
+
+        var inactive = Assert.Single(
+            result.Items,
+            item =>
+                item.ProductId ==
+                inactiveProduct.ProductId);
+
+        Assert.False(inactive.IsAvailable);
+        Assert.Equal(
+            "ProductInactive",
+            inactive.UnavailableReason);
+
+        var crossTenant = Assert.Single(
+            result.Items,
+            item =>
+                item.ProductId ==
+                otherCompanyProduct.ProductId);
+
+        Assert.False(crossTenant.IsAvailable);
+        Assert.Equal(
+            "ProductNotFound",
+            crossTenant.UnavailableReason);
+
+        var missing = Assert.Single(
+            result.Items,
+            item => item.ProductId == missingProductId);
+
+        Assert.False(missing.IsAvailable);
+        Assert.Equal(
+            "ProductNotFound",
+            missing.UnavailableReason);
+    }
+
+    [Fact]
+    public async Task Internal_endpoint_requires_correct_api_key()
+    {
+        using var factory =
+            new CatalogApiFactory(database.ConnectionString);
+
+        var request = new ResolveProductsRequestBody(
+            Guid.NewGuid(),
+            new[] { Guid.NewGuid() });
+
+        using var noKeyClient =
+            CreateInternalClient(factory, null);
+
+        var noKeyResponse = await noKeyClient.PostAsJsonAsync(
+            "/internal/catalog/products/resolve",
+            request);
+
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            noKeyResponse.StatusCode);
+
+        using var wrongKeyClient =
+            CreateInternalClient(factory, "wrong-key");
+
+        var wrongKeyResponse =
+            await wrongKeyClient.PostAsJsonAsync(
+                "/internal/catalog/products/resolve",
+                request);
+
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            wrongKeyResponse.StatusCode);
+
+        using var correctKeyClient =
+            CreateInternalClient(factory);
+
+        var correctKeyResponse =
+            await correctKeyClient.PostAsJsonAsync(
+                "/internal/catalog/products/resolve",
+                request);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            correctKeyResponse.StatusCode);
+    }
+
+    private static HttpClient CreateInternalClient(
+        CatalogApiFactory factory,
+        string? apiKey =
+            CatalogApiFactory.TestInternalApiKey)
+    {
+        var client = factory.CreateClient(
+            new Microsoft.AspNetCore.Mvc.Testing
+                .WebApplicationFactoryClientOptions
+            {
+                BaseAddress =
+                    new Uri("https://localhost")
+            });
+
+        if (apiKey is not null)
+        {
+            client.DefaultRequestHeaders.Add(
+                "X-Internal-Api-Key",
+                apiKey);
+        }
+
+        return client;
+    }
+
+    private static async Task<ProductResponse> CreateProduct(
+        HttpClient client,
+        string sku,
+        decimal price)
+    {
+        var today =
+            DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/products",
+            new CreateProductRequestBody(
+                sku,
+                $"Product {sku}",
+                "Order catalogue test product",
+                "Each",
+                price,
+                $"BATCH-{sku}",
+                today.AddDays(-1),
+                today.AddYears(1)));
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            response.StatusCode);
+
+        return (await response.Content
+            .ReadFromJsonAsync<ProductResponse>())!;
+    }
+}
