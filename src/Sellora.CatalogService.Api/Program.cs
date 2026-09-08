@@ -2,12 +2,16 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
+using Sellora.CatalogService.Api.Identity;
 using Sellora.CatalogService.Api.Tenancy;
+using Sellora.CatalogService.Application.Identity;
+using Sellora.CatalogService.Application.Outbox;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
 using Sellora.CatalogService.Infrastructure.Persistence;
 using Sellora.CatalogService.Infrastructure.Persistence.Seeding;
 using Sellora.CatalogService.Infrastructure.Products;
+using Sellora.CatalogService.Infrastructure.Outbox;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -54,6 +58,7 @@ builder.Services
 builder.Services.AddAuthorization(options => options.AddSelloraCatalogPolicies());
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
+builder.Services.AddScoped<ICurrentUserContext, HttpCurrentUserContext>();
 
 var connectionString =
     builder.Configuration.GetConnectionString("Default");
@@ -68,6 +73,15 @@ builder.Services.AddDbContext<CatalogDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IProductService, ProductService>();
+builder.Services.Configure<KafkaOptions>(
+    builder.Configuration.GetSection(KafkaOptions.SectionName));
+builder.Services.Configure<OutboxRelayOptions>(
+    builder.Configuration.GetSection(OutboxRelayOptions.SectionName));
+builder.Services.AddSingleton<IEventPublisher, KafkaEventPublisher>();
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddHostedService<OutboxRelayService>();
+}
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();

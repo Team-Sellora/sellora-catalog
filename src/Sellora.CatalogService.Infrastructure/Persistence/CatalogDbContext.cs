@@ -18,6 +18,9 @@ public class CatalogDbContext : DbContext
 
     public DbSet<Product> Products => Set<Product>();
     public DbSet<ProductBatch> ProductBatches => Set<ProductBatch>();
+    public DbSet<ProductPriceHistory> ProductPriceHistory =>
+        Set<ProductPriceHistory>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +38,16 @@ public class CatalogDbContext : DbContext
             .HasQueryFilter(batch =>
                 _tenantContext.CompanyId != null &&
                 batch.CompanyId == _tenantContext.CompanyId);
+
+        modelBuilder.Entity<ProductPriceHistory>()
+            .HasQueryFilter(history =>
+                _tenantContext.CompanyId != null &&
+                history.CompanyId == _tenantContext.CompanyId);
+
+        modelBuilder.Entity<OutboxMessage>()
+            .HasQueryFilter(message =>
+                _tenantContext.CompanyId != null &&
+                message.CompanyId == _tenantContext.CompanyId);
     }
 
 

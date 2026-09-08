@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Text.Json;
 using Sellora.CatalogService.Application.Common;
+using Sellora.CatalogService.Application.Events;
+using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Entities;
 using Sellora.CatalogService.Domain.Products;
@@ -13,13 +16,16 @@ public sealed class ProductService : IProductService
 {
     private readonly CatalogDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
+    private readonly ICurrentUserContext _currentUserContext;
 
     public ProductService(
         CatalogDbContext dbContext,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ICurrentUserContext currentUserContext)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
+        _currentUserContext = currentUserContext;
     }
 
     //create product
@@ -334,6 +340,111 @@ public sealed class ProductService : IProductService
         return UpdateProductResult.Success(response);
     }
 
+    // change product price
+    public async Task<ChangeProductPriceResult> ChangePriceAsync(
+        Guid productId,
+        ChangeProductPriceRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.CompanyId is not Guid companyId)
+        {
+            return ChangeProductPriceResult.TenantNotAvailable();
+        }
+
+        var changedBy = _currentUserContext.Subject;
+        if (string.IsNullOrWhiteSpace(changedBy))
+        {
+            return ChangeProductPriceResult.UserNotAvailable();
+        }
+
+        var validationError = ValidatePriceChangeRequest(request);
+
+        if (validationError is not null)
+        {
+            return ChangeProductPriceResult.InvalidRequest(validationError);
+        }
+
+        var product = await _dbContext.Products
+            .Include(product => product.Batches)
+            .SingleOrDefaultAsync(
+                product => product.ProductId == productId,
+                cancellationToken);
+
+        if (product is null)
+        {
+            return ChangeProductPriceResult.NotFound(productId);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var history = new ProductPriceHistory
+        {
+            PriceHistoryId = Guid.NewGuid(),
+            CompanyId = companyId,
+            ProductId = product.ProductId,
+            OldUnitPrice = product.CurrentUnitPrice,
+            NewUnitPrice = request.NewUnitPrice,
+            ChangedBy = changedBy,
+            Reason = request.Reason!.Trim(),
+            ChangedAt = now,
+            EffectiveFrom = request.EffectiveFrom,
+            Product = product
+        };
+
+        product.CurrentUnitPrice = request.NewUnitPrice;
+        product.UpdatedAt = now;
+        _dbContext.ProductPriceHistory.Add(history);
+
+        var priceChanged = new PriceChangedEvent(
+            companyId,
+            product.ProductId,
+            history.OldUnitPrice,
+            history.NewUnitPrice,
+            history.ChangedBy,
+            history.Reason,
+            history.ChangedAt,
+            history.EffectiveFrom);
+
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            OutboxId = Guid.NewGuid(),
+            CompanyId = companyId,
+            AggregateId = product.ProductId,
+            EventType = "PriceChanged",
+            SchemaVersion = "1.0",
+            Payload = JsonSerializer.Serialize(
+                priceChanged,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            OccurredAt = now,
+            NextAttemptAt = now
+        });
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var response = new ProductResponse(
+            product.ProductId,
+            product.Sku,
+            product.Name,
+            product.Description,
+            product.UnitOfMeasure,
+            product.CurrentUnitPrice,
+            product.Status,
+            product.CreatedAt,
+            product.UpdatedAt,
+            product.Batches
+                .OrderBy(batch => batch.ExpiryDate)
+                .Select(batch => new ProductBatchResponse(
+                    batch.BatchId,
+                    batch.BatchCode,
+                    batch.ManufacturingDate,
+                    batch.ExpiryDate,
+                    batch.Status,
+                    batch.CreatedAt,
+                    batch.UpdatedAt))
+                .ToArray());
+
+        return ChangeProductPriceResult.Success(response);
+    }
+
     //deactivate product
     public async Task<DeactivateProductResult> DeactivateAsync(
     Guid productId,
@@ -388,6 +499,40 @@ public sealed class ProductService : IProductService
                 .ToArray());
 
         return DeactivateProductResult.Success(response);
+    }
+
+    // Validate price change request
+    private static string? ValidatePriceChangeRequest(
+        ChangeProductPriceRequest request)
+    {
+        if (request.NewUnitPrice < 0.01m ||
+            request.NewUnitPrice > 9999999999999999.99m ||
+            decimal.Round(request.NewUnitPrice, 2) != request.NewUnitPrice)
+        {
+            return "New unit price must be between 0.01 and 9999999999999999.99 with at most two decimal places.";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Reason))
+        {
+            return "A reason for the price change is required.";
+        }
+
+        if (request.Reason!.Trim().Length > 500)
+        {
+            return "The price-change reason cannot exceed 500 characters.";
+        }
+
+        if (request.EffectiveFrom == default)
+        {
+            return "Effective date is required.";
+        }
+
+        if (request.EffectiveFrom < DateTimeOffset.UtcNow)
+        {
+            return "Effective date cannot be in the past.";
+        }
+
+        return null;
     }
 
     // validate update request

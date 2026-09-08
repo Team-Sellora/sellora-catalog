@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Sellora.CatalogService.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Sellora.CatalogService.Infrastructure.Persistence;
 namespace Sellora.CatalogService.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CatalogDbContext))]
-    partial class CatalogDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260906121212_AddProductPriceHistory")]
+    partial class AddProductPriceHistory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,75 +24,6 @@ namespace Sellora.CatalogService.Infrastructure.Persistence.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("Sellora.CatalogService.Domain.Entities.OutboxMessage", b =>
-                {
-                    b.Property<Guid>("OutboxId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("outbox_id");
-
-                    b.Property<Guid>("AggregateId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("aggregate_id");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("attempt_count");
-
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("company_id");
-
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)")
-                        .HasColumnName("event_type");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)")
-                        .HasColumnName("last_error");
-
-                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("lease_expires_at");
-
-                    b.Property<Guid?>("LeaseId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("lease_id");
-
-                    b.Property<DateTimeOffset>("NextAttemptAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("next_attempt_at");
-
-                    b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("occurred_at");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("payload");
-
-                    b.Property<DateTimeOffset?>("PublishedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("published_at");
-
-                    b.Property<string>("SchemaVersion")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("schema_version");
-
-                    b.HasKey("OutboxId")
-                        .HasName("pk_outbox_message");
-
-                    b.HasIndex("PublishedAt", "NextAttemptAt", "LeaseExpiresAt")
-                        .HasDatabaseName("ix_outbox_message_pending_relay");
-
-                    b.ToTable("outbox_message", (string)null);
-                });
 
             modelBuilder.Entity("Sellora.CatalogService.Domain.Entities.Product", b =>
                 {

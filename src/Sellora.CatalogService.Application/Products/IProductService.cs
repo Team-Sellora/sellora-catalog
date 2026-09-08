@@ -20,6 +20,11 @@ public interface IProductService
     UpdateProductRequest request,
     CancellationToken cancellationToken = default);
 
+    Task<ChangeProductPriceResult> ChangePriceAsync(
+    Guid productId,
+    ChangeProductPriceRequest request,
+    CancellationToken cancellationToken = default);
+
     Task<DeactivateProductResult> DeactivateAsync(
     Guid productId,
     CancellationToken cancellationToken = default);

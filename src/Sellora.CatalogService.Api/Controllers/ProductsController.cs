@@ -125,6 +125,47 @@ public sealed class ProductsController : ControllerBase
         };
     }
 
+    // change product price
+    [HttpPut("{productId:guid}/price")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<ProductResponse>> ChangePrice(
+        Guid productId,
+        ChangeProductPriceRequestBody body,
+        CancellationToken cancellationToken)
+    {
+        var request = new ChangeProductPriceRequest(
+            body.NewUnitPrice,
+            body.Reason,
+            body.EffectiveFrom);
+
+        var result = await _productService.ChangePriceAsync(
+            productId,
+            request,
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            ChangeProductPriceOutcome.Success =>
+                Ok(result.Product),
+
+            ChangeProductPriceOutcome.InvalidRequest =>
+                BadRequest(new { result.Message }),
+
+            ChangeProductPriceOutcome.NotFound =>
+                NotFound(new { result.Message }),
+
+            ChangeProductPriceOutcome.TenantNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            ChangeProductPriceOutcome.UserNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            _ => Problem(
+                title: "Product price change failed.",
+                statusCode: StatusCodes.Status500InternalServerError)
+        };
+    }
+
     //deactivate product
     [HttpPatch("{productId:guid}/deactivate")]
     [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]

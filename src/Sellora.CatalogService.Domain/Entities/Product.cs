@@ -17,4 +17,6 @@ public class Product : ITenantScoped
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public ICollection<ProductBatch> Batches { get; set; } = new List<ProductBatch>();
+    public ICollection<ProductPriceHistory> PriceHistory { get; set; }
+        = new List<ProductPriceHistory>();
 }
