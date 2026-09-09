@@ -35,6 +35,16 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
             .HasColumnType("uuid")
             .IsRequired();
 
+        builder.Property(product => product.CategoryId)
+            .HasColumnName("category_id")
+            .HasColumnType("uuid");
+
+        builder.HasOne(product => product.Category)
+            .WithMany(category => category.Products)
+            .HasForeignKey(product => product.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .HasConstraintName("fk_product_category");
+
         builder.Property(product => product.Sku)
             .HasColumnName("sku")
             .HasMaxLength(80)

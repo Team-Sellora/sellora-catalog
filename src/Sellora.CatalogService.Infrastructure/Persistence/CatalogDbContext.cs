@@ -16,6 +16,7 @@ public class CatalogDbContext : DbContext
         _tenantContext = tenantContext;
     }
 
+    public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<ProductBatch> ProductBatches => Set<ProductBatch>();
     public DbSet<ProductPriceHistory> ProductPriceHistory =>
@@ -57,6 +58,11 @@ public class CatalogDbContext : DbContext
 
         modelBuilder.ApplyConfigurationsFromAssembly(
             typeof(CatalogDbContext).Assembly);
+
+        modelBuilder.Entity<Category>()
+            .HasQueryFilter(category =>
+                _tenantContext.CompanyId != null &&
+                category.CompanyId == _tenantContext.CompanyId);
 
         modelBuilder.Entity<Product>()
             .HasQueryFilter(product =>
