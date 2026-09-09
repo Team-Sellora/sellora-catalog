@@ -4,4 +4,5 @@ public sealed record UpdateProductRequest(
     string Sku,
     string Name,
     string? Description,
-    string UnitOfMeasure);
+    string UnitOfMeasure,
+    Guid? CategoryId = null);

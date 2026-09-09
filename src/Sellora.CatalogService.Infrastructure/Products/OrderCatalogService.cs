@@ -174,10 +174,11 @@ public sealed class OrderCatalogService : IOrderCatalogService
     }
 
     public async Task<IReadOnlyCollection<OrderCatalogueProductResponse>>
-        GetCatalogueAsync(
-            Guid companyId,
-            string? search,
-            CancellationToken cancellationToken = default)
+    GetCatalogueAsync(
+        Guid companyId,
+        string? search,
+        Guid? categoryId,
+        CancellationToken cancellationToken = default)
     {
         if (companyId == Guid.Empty)
         {
@@ -194,6 +195,12 @@ public sealed class OrderCatalogService : IOrderCatalogService
             .Where(product =>
                 product.CompanyId == companyId &&
                 product.Status == ProductStatus.Active);
+
+        if (categoryId is Guid selectedCategoryId)
+        {
+            productsQuery = productsQuery.Where(
+                product => product.CategoryId == selectedCategoryId);
+        }
 
         if (!string.IsNullOrWhiteSpace(search))
         {

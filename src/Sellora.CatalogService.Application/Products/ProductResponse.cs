@@ -10,4 +10,5 @@ public sealed record ProductResponse(
     string Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt,
-    IReadOnlyCollection<ProductBatchResponse> Batches);
+    IReadOnlyCollection<ProductBatchResponse> Batches,
+    Guid? CategoryId = null);

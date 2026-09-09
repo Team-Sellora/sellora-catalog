@@ -48,6 +48,15 @@ public sealed class ProductService : IProductService
             return CreateProductResult.InvalidRequest(validationError);
         }
 
+        var categoryValidationError = await ValidateCategoryAsync(
+            request.CategoryId,
+            cancellationToken);
+
+        if (categoryValidationError is not null)
+        {
+            return CreateProductResult.InvalidRequest(categoryValidationError);
+        }
+
         var normalizedSku = request.Sku.Trim().ToUpperInvariant();
         var normalizedBatchCode =
             request.BatchCode.Trim().ToUpperInvariant();
@@ -68,6 +77,7 @@ public sealed class ProductService : IProductService
         {
             ProductId = productId,
             CompanyId = companyId,
+            CategoryId = request.CategoryId,
             Sku = normalizedSku,
             Name = request.Name.Trim(),
             Description = string.IsNullOrWhiteSpace(request.Description)
@@ -137,7 +147,8 @@ public sealed class ProductService : IProductService
                 batch.Status,
                 batch.CreatedAt,
                 batch.UpdatedAt)
-            });
+            },
+            product.CategoryId);
 
         return CreateProductResult.Success(response);
     }
@@ -161,6 +172,13 @@ public sealed class ProductService : IProductService
                 ? ProductStatus.Inactive : ProductStatus.Active;
             productsQuery = productsQuery.Where(product => product.Status == status);
         }
+
+        if (query.CategoryId is Guid categoryId)
+        {
+            productsQuery = productsQuery.Where(
+                product => product.CategoryId == categoryId);
+        }
+
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -202,7 +220,8 @@ public sealed class ProductService : IProductService
                         batch.Status,
                         batch.CreatedAt,
                         batch.UpdatedAt))
-                    .ToArray()))
+                    .ToArray(),
+                product.CategoryId))
             .ToArray();
 
         return new PagedResponse<ProductResponse>(
@@ -250,7 +269,8 @@ public sealed class ProductService : IProductService
                     batch.Status,
                     batch.CreatedAt,
                     batch.UpdatedAt))
-                .ToArray());
+                .ToArray(),
+            product.CategoryId);
     }
 
     //update product
@@ -269,6 +289,15 @@ public sealed class ProductService : IProductService
         if (validationError is not null)
         {
             return UpdateProductResult.InvalidRequest(validationError);
+        }
+
+        var categoryValidationError = await ValidateCategoryAsync(
+            request.CategoryId,
+            cancellationToken);
+
+        if (categoryValidationError is not null)
+        {
+            return UpdateProductResult.InvalidRequest(categoryValidationError);
         }
 
         var product = await _dbContext.Products
@@ -302,6 +331,7 @@ public sealed class ProductService : IProductService
             : request.Description.Trim();
         product.UnitOfMeasure = request.UnitOfMeasure.Trim();
         product.UpdatedAt = DateTimeOffset.UtcNow;
+        product.CategoryId = request.CategoryId;
 
         try
         {
@@ -340,7 +370,8 @@ public sealed class ProductService : IProductService
                     batch.Status,
                     batch.CreatedAt,
                     batch.UpdatedAt))
-                .ToArray());
+                .ToArray(),
+            product.CategoryId);
 
         return UpdateProductResult.Success(response);
     }
@@ -447,7 +478,8 @@ public sealed class ProductService : IProductService
                     batch.Status,
                     batch.CreatedAt,
                     batch.UpdatedAt))
-                .ToArray());
+                .ToArray(),
+                product.CategoryId);
 
         return ChangeProductPriceResult.Success(response);
     }
@@ -542,7 +574,8 @@ public sealed class ProductService : IProductService
                     batch.Status,
                     batch.CreatedAt,
                     batch.UpdatedAt))
-                .ToArray());
+                .ToArray(),
+            product.CategoryId);
 
         return DeactivateProductResult.Success(response);
     }
@@ -683,6 +716,26 @@ public sealed class ProductService : IProductService
         }
 
         return null;
+    }
+
+    private async Task<string?> ValidateCategoryAsync(
+    Guid? categoryId,
+    CancellationToken cancellationToken)
+    {
+        if (categoryId is null)
+        {
+            return null;
+        }
+
+        var categoryIsActive = await _dbContext.Categories.AnyAsync(
+            category =>
+                category.CategoryId == categoryId &&
+                category.Status == CategoryStatus.Active,
+            cancellationToken);
+
+        return categoryIsActive
+            ? null
+            : "Selected category was not found or is inactive.";
     }
 
     private void EnsureTenantAvailable()

@@ -26,6 +26,7 @@ public sealed class OrderCatalogueController : ControllerBase
     public async Task<ActionResult<
         IReadOnlyCollection<OrderCatalogueProductResponse>>> GetCatalogue(
         [FromQuery] string? search,
+        [FromQuery] Guid? categoryId,
         CancellationToken cancellationToken)
     {
         if (_tenantContext.CompanyId is not Guid companyId)
@@ -40,6 +41,7 @@ public sealed class OrderCatalogueController : ControllerBase
         var products = await _orderCatalogService.GetCatalogueAsync(
             companyId,
             search,
+            categoryId,
             cancellationToken);
 
         return Ok(products);

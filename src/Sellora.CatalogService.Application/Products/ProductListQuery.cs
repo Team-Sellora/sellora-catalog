@@ -4,4 +4,5 @@ public sealed record ProductListQuery(
     string? Search,
     int Page = 1,
     int PageSize = 20,
-    string Status = "Active");
+    string Status = "Active",
+    Guid? CategoryId = null);
