@@ -3,15 +3,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Identity;
+using Sellora.CatalogService.Api.Security;
 using Sellora.CatalogService.Api.Tenancy;
 using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Outbox;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
+using Sellora.CatalogService.Infrastructure.Outbox;
 using Sellora.CatalogService.Infrastructure.Persistence;
 using Sellora.CatalogService.Infrastructure.Persistence.Seeding;
 using Sellora.CatalogService.Infrastructure.Products;
-using Sellora.CatalogService.Infrastructure.Outbox;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,22 +23,25 @@ builder.Host.UseSerilog((context, configuration) => configuration
     .WriteTo.Console());
 
 var jwt = builder.Configuration.GetSection("Jwt");
+var audiences = jwt.GetSection("Audience").Get<string[]>()
+    ?? new[] { jwt["Audience"]! };
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.Authority = jwt["Authority"];
         options.MetadataAddress = jwt["MetadataAddress"]!;
-        options.Audience = jwt["Audience"];
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidIssuer = jwt["Issuer"],
             ValidateAudience = true,
-            ValidAudience = jwt["Audience"],
+            ValidAudiences = audiences,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ClockSkew = TimeSpan.FromSeconds(30)
+            ClockSkew = TimeSpan.FromSeconds(30),
+            RoleClaimType = "roles",
         };
 
         // The shared development Identity Server currently uses a certificate
@@ -73,6 +77,23 @@ builder.Services.AddDbContext<CatalogDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IProductService, ProductService>();
+
+builder.Services.Configure<ProductPriceCacheOptions>(
+    builder.Configuration.GetSection(
+        ProductPriceCacheOptions.SectionName));
+
+builder.Services.Configure<InternalApiOptions>(
+    builder.Configuration.GetSection(
+        InternalApiOptions.SectionName));
+
+builder.Services.AddSingleton<
+    IProductPriceCache,
+    ProductPriceCache>();
+
+builder.Services.AddScoped<
+    IOrderCatalogService,
+    OrderCatalogService>();
+
 builder.Services.Configure<KafkaOptions>(
     builder.Configuration.GetSection(KafkaOptions.SectionName));
 builder.Services.Configure<OutboxRelayOptions>(
@@ -134,7 +155,7 @@ app.UseHttpsRedirection();
 
 // Run CORS before authentication so browser preflight requests are accepted.
 app.UseCors();
-
+app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

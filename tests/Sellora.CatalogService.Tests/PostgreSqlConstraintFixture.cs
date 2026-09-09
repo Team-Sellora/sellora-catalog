@@ -13,7 +13,7 @@ namespace Sellora.CatalogService.Tests;
 public sealed class PostgreSqlConstraintFixture : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _database =
-        new PostgreSqlBuilder("postgres:16")
+        new PostgreSqlBuilder("postgres:16-alpine")
             .WithDatabase("catalog_constraint_tests")
             .WithUsername("sellora_test")
             .WithPassword("sellora_test_password")
