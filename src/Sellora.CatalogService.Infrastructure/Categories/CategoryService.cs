@@ -150,8 +150,8 @@ public sealed class CategoryService : ICategoryService
     }
 
     public async Task<DeactivateCategoryResult> DeactivateAsync(
-        Guid categoryId,
-        CancellationToken cancellationToken = default)
+    Guid categoryId,
+    CancellationToken cancellationToken = default)
     {
         if (_tenantContext.CompanyId is null)
         {
@@ -172,10 +172,24 @@ public sealed class CategoryService : ICategoryService
             return DeactivateCategoryResult.AlreadyInactive(categoryId);
         }
 
+        var now = DateTimeOffset.UtcNow;
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            cancellationToken);
+
+        await _dbContext.Products
+            .Where(product => product.CategoryId == categoryId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(product => product.CategoryId, (Guid?)null)
+                    .SetProperty(product => product.UpdatedAt, now),
+                cancellationToken);
+
         category.Status = CategoryStatus.Inactive;
-        category.UpdatedAt = DateTimeOffset.UtcNow;
+        category.UpdatedAt = now;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return DeactivateCategoryResult.Success(ToResponse(category));
     }
