@@ -56,6 +56,30 @@ public sealed class BatchMigrationTests
         var migrator = db.GetService<IMigrator>();
 
         await migrator.MigrateAsync("20260904051529_InitialCatalogSchema");
+
+        // Seed through SQL because this test deliberately holds the database at the
+        // initial schema. The current Product entity includes CategoryId, which was
+        // introduced by a later migration and therefore cannot be used here.
+        var originalProductId = Guid.NewGuid();
+        var originalBatchId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO product
+                (product_id, company_id, sku, name, unit_of_measure,
+                 current_unit_price, status, created_at)
+            VALUES
+                ({originalProductId}, {tenant.CompanyId!.Value}, {"SKU-1"}, {"Name"}, {"Each"},
+                 {1m}, {"Active"}, {now});
+
+            INSERT INTO product_batch
+                (batch_id, product_id, company_id, batch_code, manufacturing_date,
+                 expiry_date, status, created_at)
+            VALUES
+                ({originalBatchId}, {originalProductId}, {tenant.CompanyId!.Value}, {"BATCH"},
+                 {new DateOnly(2026, 1, 1)}, {new DateOnly(2027, 1, 1)}, {"Active"}, {now});
+            """);
+
+        await migrator.MigrateAsync();
         var service = new ProductService(
             db,
             tenant,
@@ -63,17 +87,14 @@ public sealed class BatchMigrationTests
             new NoOpProductPriceCache());
 
         var request = new CreateProductRequest("SKU-1", "Name", null, "Each", 1m, "BATCH", new(2026, 1, 1), new(2027, 1, 1));
-        var original = await service.CreateAsync(request);
-        Assert.True(original.IsSuccess);
-        await migrator.MigrateAsync();
         Assert.True((await service.CreateAsync(request with { Sku = "SKU-2" })).IsSuccess);
         Assert.Equal(2, await db.Products.CountAsync());
-        Assert.NotNull(await service.GetProductByIdAsync(original.Product!.ProductId));
+        Assert.NotNull(await service.GetProductByIdAsync(originalProductId));
         db.ProductBatches.Add(new ProductBatch
         {
             BatchId = Guid.NewGuid(),
             CompanyId = tenant.CompanyId!.Value,
-            ProductId = original.Product.ProductId,
+            ProductId = originalProductId,
             BatchCode = "BATCH",
             ManufacturingDate = new(2026, 1, 1),
             ExpiryDate = new(2027, 1, 1),
