@@ -10,5 +10,6 @@ public interface IOrderCatalogService
     Task<IReadOnlyCollection<OrderCatalogueProductResponse>> GetCatalogueAsync(
         Guid companyId,
         string? search,
+        Guid? categoryId,
         CancellationToken cancellationToken = default);
 }

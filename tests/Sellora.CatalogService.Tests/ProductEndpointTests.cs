@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Sellora.CatalogService.Api.Contracts;
+using Sellora.CatalogService.Application.Categories;
 using Sellora.CatalogService.Application.Common;
 using Sellora.CatalogService.Application.Events;
 using Sellora.CatalogService.Application.Products;
@@ -196,6 +197,36 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
         Assert.Equal("NEW-SKU", updated.Sku);
         Assert.Equal("New name", updated.Name);
         Assert.Equal(product.CurrentUnitPrice, updated.CurrentUnitPrice);
+    }
+
+    [Fact]
+    public async Task Update_preserves_category_when_category_id_is_omitted_and_clears_it_when_null_is_sent()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var categoryResponse = await client.PostAsJsonAsync(
+            "/api/categories",
+            new CreateCategoryRequestBody("Beverages", null));
+        Assert.Equal(HttpStatusCode.Created, categoryResponse.StatusCode);
+        var category = (await categoryResponse.Content.ReadFromJsonAsync<CategoryResponse>())!;
+
+        var productResponse = await client.PostAsJsonAsync(
+            "/api/products",
+            Request() with { CategoryId = category.CategoryId });
+        Assert.Equal(HttpStatusCode.Created, productResponse.StatusCode);
+        var product = (await productResponse.Content.ReadFromJsonAsync<ProductResponse>())!;
+
+        var omittedCategory = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}",
+            new { sku = "SKU-1", name = "Updated product", description = "Description", unitOfMeasure = "Each" });
+        Assert.Equal(HttpStatusCode.OK, omittedCategory.StatusCode);
+        Assert.Equal(category.CategoryId, (await omittedCategory.Content.ReadFromJsonAsync<ProductResponse>())!.CategoryId);
+
+        var explicitNullCategory = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}",
+            new { sku = "SKU-1", name = "Updated product", description = "Description", unitOfMeasure = "Each", categoryId = (Guid?)null });
+        Assert.Equal(HttpStatusCode.OK, explicitNullCategory.StatusCode);
+        Assert.Null((await explicitNullCategory.Content.ReadFromJsonAsync<ProductResponse>())!.CategoryId);
     }
 
     [Fact]

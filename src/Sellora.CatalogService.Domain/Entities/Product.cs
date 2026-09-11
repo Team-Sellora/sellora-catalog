@@ -8,6 +8,8 @@ public class Product : ITenantScoped
     public Guid ProductId { get; set; }
 
     public Guid CompanyId { get; set; }
+    public Guid? CategoryId { get; set; }
+    public Category? Category { get; set; }
     public string Sku { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }

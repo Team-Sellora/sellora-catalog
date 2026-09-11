@@ -26,6 +26,7 @@ public sealed class ProductsController : ControllerBase
     [Authorize(Policy = RolePolicies.RequireCatalogReader)]
     public async Task<ActionResult<PagedResponse<ProductResponse>>> GetProducts(
     [FromQuery] string? search,
+    [FromQuery] Guid? categoryId,
     [FromQuery] int page = 1,
     [FromQuery] int pageSize = 20,
     [FromQuery] string status = "Active",
@@ -48,7 +49,8 @@ public sealed class ProductsController : ControllerBase
             search,
             page,
             pageSize,
-            normalizedStatus);
+            normalizedStatus,
+            categoryId);
 
         var response = await _productService.GetProductsAsync(
             query,
@@ -97,7 +99,8 @@ public sealed class ProductsController : ControllerBase
             body.CurrentUnitPrice,
             body.BatchCode,
             body.ManufacturingDate,
-            body.ExpiryDate);
+            body.ExpiryDate,
+            body.CategoryId);
 
         var result = await _productService.CreateAsync(
             request,
@@ -166,6 +169,7 @@ public sealed class ProductsController : ControllerBase
         };
     }
 
+    //get product price history
     [HttpGet("{productId:guid}/price-history")]
     [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
     public async Task<ActionResult<IReadOnlyCollection<PriceHistoryResponse>>> GetPriceHistory(
@@ -238,7 +242,9 @@ public sealed class ProductsController : ControllerBase
             body.Sku,
             body.Name,
             body.Description,
-            body.UnitOfMeasure);
+            body.UnitOfMeasure,
+            body.CategoryId,
+            body.IsCategoryIdSpecified);
 
         var result = await _productService.UpdateAsync(
             productId,

@@ -8,4 +8,5 @@ public sealed record CreateProductRequestBody(
     decimal CurrentUnitPrice,
     string BatchCode,
     DateOnly ManufacturingDate,
-    DateOnly ExpiryDate);
+    DateOnly ExpiryDate,
+    Guid? CategoryId = null);

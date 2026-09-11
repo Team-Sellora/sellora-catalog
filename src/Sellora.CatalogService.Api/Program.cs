@@ -5,10 +5,12 @@ using Sellora.CatalogService.Api.Authorization;
 using Sellora.CatalogService.Api.Identity;
 using Sellora.CatalogService.Api.Security;
 using Sellora.CatalogService.Api.Tenancy;
+using Sellora.CatalogService.Application.Categories;
 using Sellora.CatalogService.Application.Identity;
 using Sellora.CatalogService.Application.Outbox;
 using Sellora.CatalogService.Application.Products;
 using Sellora.CatalogService.Domain.Tenancy;
+using Sellora.CatalogService.Infrastructure.Categories;
 using Sellora.CatalogService.Infrastructure.Outbox;
 using Sellora.CatalogService.Infrastructure.Persistence;
 using Sellora.CatalogService.Infrastructure.Persistence.Seeding;
@@ -63,6 +65,7 @@ builder.Services.AddAuthorization(options => options.AddSelloraCatalogPolicies()
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
 builder.Services.AddScoped<ICurrentUserContext, HttpCurrentUserContext>();
+builder.Services.AddScoped<ICategoryService, CategoryService>();
 
 var connectionString =
     builder.Configuration.GetConnectionString("Default");
