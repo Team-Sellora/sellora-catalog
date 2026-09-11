@@ -5,4 +5,5 @@ public sealed record UpdateProductRequest(
     string Name,
     string? Description,
     string UnitOfMeasure,
-    Guid? CategoryId = null);
+    Guid? CategoryId = null,
+    bool IsCategoryIdSpecified = false);

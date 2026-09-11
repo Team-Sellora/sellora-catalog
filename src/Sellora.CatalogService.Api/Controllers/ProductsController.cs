@@ -243,7 +243,8 @@ public sealed class ProductsController : ControllerBase
             body.Name,
             body.Description,
             body.UnitOfMeasure,
-            body.CategoryId);
+            body.CategoryId,
+            body.IsCategoryIdSpecified);
 
         var result = await _productService.UpdateAsync(
             productId,

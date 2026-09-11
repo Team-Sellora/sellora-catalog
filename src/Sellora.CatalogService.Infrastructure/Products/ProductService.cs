@@ -291,9 +291,9 @@ public sealed class ProductService : IProductService
             return UpdateProductResult.InvalidRequest(validationError);
         }
 
-        var categoryValidationError = await ValidateCategoryAsync(
-            request.CategoryId,
-            cancellationToken);
+        var categoryValidationError = request.IsCategoryIdSpecified
+            ? await ValidateCategoryAsync(request.CategoryId, cancellationToken)
+            : null;
 
         if (categoryValidationError is not null)
         {
@@ -331,7 +331,10 @@ public sealed class ProductService : IProductService
             : request.Description.Trim();
         product.UnitOfMeasure = request.UnitOfMeasure.Trim();
         product.UpdatedAt = DateTimeOffset.UtcNow;
-        product.CategoryId = request.CategoryId;
+        if (request.IsCategoryIdSpecified)
+        {
+            product.CategoryId = request.CategoryId;
+        }
 
         try
         {
