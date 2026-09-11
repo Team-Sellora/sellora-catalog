@@ -43,10 +43,13 @@ jobs:
 
       - name: Validate deployed production startup
         shell: bash
+        env:
+          BASE_URL: ${{ secrets.PRODUCTION_BASE_URL }}
         run: |
           set -euo pipefail
-          HEALTH_URL="https://sellora-catalog-e9csg7h9gyhwf6hw.southeastasia-01.azurewebsites.net/health"
-          WHOAMI_URL="https://sellora-catalog-e9csg7h9gyhwf6hw.southeastasia-01.azurewebsites.net/whoami"
+      
+          HEALTH_URL="${BASE_URL}/health"
+          WHOAMI_URL="${BASE_URL}/whoami"
 
           for attempt in {1..12}; do
             HEALTH_STATUS=$(curl \
