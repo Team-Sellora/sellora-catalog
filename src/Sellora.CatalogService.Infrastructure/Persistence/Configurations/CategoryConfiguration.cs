@@ -53,12 +53,7 @@ public sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
             .HasColumnName("updated_at")
             .HasColumnType("timestamp with time zone");
 
-        builder.HasIndex(category => new
-        {
-            category.CompanyId,
-            category.Name
-        })
-        .IsUnique()
-        .HasDatabaseName("uq_category_company_name");
+        // The case-insensitive unique index is created in a migration because
+        // EF Core cannot model PostgreSQL expression indexes such as lower(name).
     }
 }
