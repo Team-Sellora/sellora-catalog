@@ -66,6 +66,8 @@ namespace Sellora.CatalogService.Infrastructure.Persistence.Migrations
         }
 
         /// <inheritdoc />
+        // Restores case-sensitive uniqueness only.
+        // Category names changed by Up() are intentionally preserved.
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("DROP INDEX uq_category_company_name;");

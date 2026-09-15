@@ -78,6 +78,16 @@ API and database tests use Testcontainers.PostgreSql 4.14.0 with `postgres:16`, 
 
 The API applies pending migrations at startup, except in `Testing`, where fixtures apply them. Local configuration matches Docker Compose (`catalog_db` on port 5434). Start the development database before the API. Hosted environments must override `ConnectionStrings__Default`. Existing data from a different local database is not transferred automatically.
 
+### Startup database failures
+
+If migration or staging seed initialization throws an exception, the service logs the full error and starts in an unavailable state instead of terminating. API requests, including internal routes, return HTTP 503 without exposing database error details. The outbox worker is disabled for that process.
+
+- `/health` returns HTTP 503 after failed initialization; deployment checks must continue using this endpoint to reject an unhealthy deployment.
+- `/health/live` returns HTTP 200 once the HTTP host is running, even after initialization failure. Use this endpoint only for process liveness, never as deployment readiness.
+- Repair the database or configuration based on the startup log, then restart the service to retry initialization. There is no automatic migration retry in the running process.
+
+This prevents application aborts caused by initialization exceptions. Hosting rules configured to restart unhealthy instances can still restart the process; keep liveness and readiness policies distinct.
+
 Run tests with coverage using `dotnet test -c Release --collect "XPlat Code Coverage"`.
 
 ## Local commands
