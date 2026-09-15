@@ -18,6 +18,8 @@ using Sellora.CatalogService.Infrastructure.Products;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+// Set before the host starts; failed initialization keeps all database work disabled.
+var databaseReady = false;
 
 builder.Host.UseSerilog((context, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
@@ -104,10 +106,15 @@ builder.Services.Configure<OutboxRelayOptions>(
 builder.Services.AddSingleton<IEventPublisher, KafkaEventPublisher>();
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    builder.Services.AddHostedService<OutboxRelayService>();
+    builder.Services.AddSingleton<IHostedService>(services => databaseReady
+        ? ActivatorUtilities.CreateInstance<OutboxRelayService>(services)
+        : new DatabaseUnavailableService());
 }
 builder.Services.AddProblemDetails();
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks().AddCheck("database_initialization", () => databaseReady
+    ? Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy()
+    : Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy(
+        "Database initialization failed. Repair the database and restart the service."));
 builder.Services.AddControllers();
 
 var allowedOrigins = builder.Configuration
@@ -138,15 +145,50 @@ app.UseSerilogRequestLogging();
 // Match Organization; test fixtures migrate their isolated databases themselves.
 if (!app.Environment.IsEnvironment("Testing"))
 {
-    await using var scope = app.Services.CreateAsyncScope();
-    var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
-    await db.Database.MigrateAsync();
-
-    if (app.Environment.IsStaging())
+    try
     {
-        await DevelopmentCatalogSeeder.SeedAsync(db);
+        await using var scope = app.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        await db.Database.MigrateAsync();
+
+        if (app.Environment.IsStaging())
+        {
+            await DevelopmentCatalogSeeder.SeedAsync(db);
+        }
+        databaseReady = true;
+    }
+    catch (Exception exception)
+    {
+        app.Logger.LogCritical(exception,
+            "Catalog database initialization failed. Serving HTTP 503 with outbox processing disabled. Repair the database and restart the service.");
     }
 }
+else
+{
+    databaseReady = true; // Test fixtures apply migrations before creating the host.
+}
+
+// Liveness remains available without database access. Readiness (/health) is
+// unhealthy after a failed migration. Never expose database exception details.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.Equals(new PathString("/health/live")))
+    {
+        await Results.Ok(new { Status = "Alive" }).ExecuteAsync(context);
+        return;
+    }
+
+    if (!databaseReady)
+    {
+        await Results.Problem(
+            title: "Catalog service unavailable",
+            detail: "Database initialization has not completed successfully.",
+            statusCode: StatusCodes.Status503ServiceUnavailable).ExecuteAsync(context);
+        return;
+    }
+
+    await next(context);
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -170,3 +212,10 @@ app.MapGet("/whoami", (HttpContext context) =>
 app.Run();
 
 public partial class Program;
+
+// Do not construct or start the database-backed relay when initialization fails.
+internal sealed class DatabaseUnavailableService : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
