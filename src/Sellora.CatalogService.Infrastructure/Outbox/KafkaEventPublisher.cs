@@ -10,7 +10,12 @@ public sealed class KafkaOptions
     public string BootstrapServers { get; init; } = "localhost:9092";
     public string CatalogTopic { get; init; } = "sellora.catalog.v1";
     public int MessageTimeoutMs { get; init; } = 10_000;
+
+    // Confluent Cloud requires SASL. Leave empty for a local broker.
+    public string? SaslUsername { get; init; }
+    public string? SaslPassword { get; init; }
 }
+
 
 public sealed class KafkaEventPublisher : IEventPublisher, IDisposable
 {
@@ -20,14 +25,33 @@ public sealed class KafkaEventPublisher : IEventPublisher, IDisposable
     public KafkaEventPublisher(IOptions<KafkaOptions> options)
     {
         _options = options.Value;
-        _producer = new ProducerBuilder<string, string>(new ProducerConfig
+
+        var config = new ProducerConfig
         {
             BootstrapServers = _options.BootstrapServers,
             EnableIdempotence = true,
             Acks = Acks.All,
             MessageTimeoutMs = _options.MessageTimeoutMs
-        }).Build();
+        };
+
+        ApplySasl(config, _options);
+
+        _producer = new ProducerBuilder<string, string>(config).Build();
     }
+
+    private static void ApplySasl(ClientConfig config, KafkaOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.SaslUsername))
+        {
+            return;
+        }
+
+        config.SecurityProtocol = SecurityProtocol.SaslSsl;
+        config.SaslMechanism = SaslMechanism.Plain;
+        config.SaslUsername = options.SaslUsername;
+        config.SaslPassword = options.SaslPassword;
+    }
+
 
     public async Task PublishAsync(
         OutboxMessageToPublish message,
