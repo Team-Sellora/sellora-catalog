@@ -1,0 +1,478 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Sellora.CatalogService.Api.Contracts;
+using Sellora.CatalogService.Application.Categories;
+using Sellora.CatalogService.Application.Common;
+using Sellora.CatalogService.Application.Events;
+using Sellora.CatalogService.Application.Products;
+using Sellora.CatalogService.Infrastructure.Persistence;
+using Xunit;
+
+namespace Sellora.CatalogService.Tests;
+
+public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) : IClassFixture<PostgreSqlConstraintFixture>
+{
+    [Theory]
+    [InlineData("tEsT pRoDuCt")]
+    [InlineData("sKu-SeArCh")]
+    public async Task Search_matches_name_and_sku_case_insensitively_with_status_paging_and_tenant_isolation(string search)
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        using var otherTenant = factory.Client(Guid.NewGuid().ToString());
+        var first = await Create(client, "SKU-SEARCH-1");
+        await Create(client, "SKU-SEARCH-2");
+        var inactive = await Create(client, "SKU-SEARCH-3");
+        await Create(otherTenant, "SKU-SEARCH-OTHER");
+        Assert.Equal(HttpStatusCode.OK, (await client.PatchAsync($"/api/products/{inactive.ProductId}/deactivate", null)).StatusCode);
+
+        var url = $"/api/products?search={Uri.EscapeDataString(search)}&pageSize=1";
+        var result = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>(url);
+        Assert.Equal(2, result!.TotalCount);
+        Assert.Equal(first.ProductId, Assert.Single(result.Items).ProductId);
+        var all = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>(url + "&status=All");
+        Assert.Equal(3, all!.TotalCount);
+        var inactiveResult = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>(url + "&status=Inactive");
+        Assert.Equal(inactive.ProductId, Assert.Single(inactiveResult!.Items).ProductId);
+        var missing = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?search=no-match");
+        Assert.Empty(missing!.Items);
+    }
+
+    private static CreateProductRequest Request(string sku = "SKU-1", decimal price = 12.34m) =>
+        new(sku, "Test product", "Description", "Each", price, "BATCH-1", new(2026, 1, 1), new(2027, 1, 1));
+
+    private static async Task<ProductResponse> Create(HttpClient client, string sku = "SKU-1")
+    {
+        var response = await client.PostAsJsonAsync("/api/products", Request(sku));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<ProductResponse>())!;
+    }
+
+    [Fact]
+    public async Task Deactivation_hides_default_list_but_preserves_history_and_filtered_paging()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var first = await Create(client);
+        await Create(client, "SKU-2");
+        // Use persisted timestamps on both sides of the history comparison.
+        var beforeDeactivation = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{first.ProductId}");
+        Assert.NotNull(beforeDeactivation);
+        Assert.Single(beforeDeactivation.Batches);
+        Assert.Equal(HttpStatusCode.OK, (await client.PatchAsync($"/api/products/{first.ProductId}/deactivate", null)).StatusCode);
+        var active = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?pageSize=1");
+        Assert.Equal(1, active!.TotalCount);
+        Assert.Equal("SKU-2", Assert.Single(active.Items).Sku);
+        var inactive = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?status=inactive&pageSize=1");
+        Assert.Equal(1, inactive!.TotalCount);
+        Assert.Equal(first.ProductId, Assert.Single(inactive.Items).ProductId);
+        var all = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?status=all&pageSize=1&page=2");
+        Assert.Equal(2, all!.TotalCount);
+        Assert.Single(all.Items);
+        var history = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{first.ProductId}");
+        Assert.Equal("Inactive", history!.Status);
+        Assert.Equal(beforeDeactivation.Batches, history.Batches);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsync($"/api/products/{first.ProductId}/deactivate", null)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    public async Task Missing_or_malformed_tenant_returns_401_on_every_endpoint(string? tenant)
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(tenant);
+        var id = Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/products")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync($"/api/products/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/products", Request())).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PutAsJsonAsync($"/api/products/{id}", new UpdateProductRequest("SKU", "Name", null, "Each"))).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            (await client.PutAsJsonAsync(
+                $"/api/products/{id}/price",
+                new ChangeProductPriceRequestBody(
+                    20m,
+                    "Price update",
+                    DateTimeOffset.UtcNow.AddMinutes(5))))
+            .StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PatchAsync($"/api/products/{id}/deactivate", null)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("0.004")]
+    [InlineData("0.005")]
+    [InlineData("12.345")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("10000000000000000")]
+    public async Task Unrepresentable_prices_return_400_without_writing(string price)
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var response = await client.PostAsJsonAsync("/api/products", Request(price: decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture)));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var products = await client.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products");
+        Assert.Empty(products!.Items);
+    }
+
+    [Theory]
+    [InlineData("0.01")]
+    [InlineData("12.340")]
+    [InlineData("9999999999999999.99")]
+    public async Task Representable_prices_are_accepted(string price)
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var value = decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture);
+        var response = await client.PostAsJsonAsync("/api/products", Request(price: value));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(value, (await response.Content.ReadFromJsonAsync<ProductResponse>())!.CurrentUnitPrice);
+    }
+
+    [Fact]
+    public async Task Sku_is_unique_per_tenant_and_batch_codes_can_be_reused_across_products()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var a = factory.Client(Guid.NewGuid().ToString());
+        using var b = factory.Client(Guid.NewGuid().ToString());
+        var product = await Create(a);
+        await Create(a, "SKU-2");
+        Assert.Equal(HttpStatusCode.Conflict, (await a.PostAsJsonAsync("/api/products", Request(" sku-1 "))).StatusCode);
+        await Create(b);
+        Assert.Equal(HttpStatusCode.NotFound, (await b.GetAsync($"/api/products/{product.ProductId}")).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await b.PutAsJsonAsync(
+                $"/api/products/{product.ProductId}/price",
+                new ChangeProductPriceRequestBody(
+                    20m,
+                    "Cross-tenant attempt",
+                    DateTimeOffset.UtcNow.AddMinutes(5))))
+            .StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await b.PutAsJsonAsync($"/api/products/{product.ProductId}", new UpdateProductRequest("NEW", "Name", null, "Each"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await b.PatchAsync($"/api/products/{product.ProductId}/deactivate", null)).StatusCode);
+        var list = await b.GetFromJsonAsync<PagedResponse<ProductResponse>>("/api/products?status=all");
+        Assert.Single(list!.Items);
+    }
+
+    [Theory]
+    [InlineData("AreaManager")]
+    [InlineData("AgencyOperator")]
+    [InlineData("SalesRep")]
+    public async Task Readers_cannot_write(string role)
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString(), role);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/products")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/products", Request())).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/products/{Guid.NewGuid()}", new UpdateProductRequest("SKU", "Name", null, "Each"))).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await client.PutAsJsonAsync(
+                $"/api/products/{Guid.NewGuid()}/price",
+                new ChangeProductPriceRequestBody(
+                    20m,
+                    "Price update",
+                    DateTimeOffset.UtcNow.AddMinutes(5))))
+            .StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsync($"/api/products/{Guid.NewGuid()}/deactivate", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Invalid_status_and_dates_are_rejected_and_update_preserves_price()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/products?status=invalid")).StatusCode);
+        var invalid = Request() with { ExpiryDate = new(2025, 1, 1) };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/products", invalid)).StatusCode);
+        var product = await Create(client);
+        var response = await client.PutAsJsonAsync($"/api/products/{product.ProductId}", new UpdateProductRequest(" new-sku ", "New name", null, "Box"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = (await response.Content.ReadFromJsonAsync<ProductResponse>())!;
+        Assert.Equal("NEW-SKU", updated.Sku);
+        Assert.Equal("New name", updated.Name);
+        Assert.Equal(product.CurrentUnitPrice, updated.CurrentUnitPrice);
+    }
+
+    [Fact]
+    public async Task Update_preserves_category_when_category_id_is_omitted_and_clears_it_when_null_is_sent()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var categoryResponse = await client.PostAsJsonAsync(
+            "/api/categories",
+            new CreateCategoryRequestBody("Beverages", null));
+        Assert.Equal(HttpStatusCode.Created, categoryResponse.StatusCode);
+        var category = (await categoryResponse.Content.ReadFromJsonAsync<CategoryResponse>())!;
+
+        var productResponse = await client.PostAsJsonAsync(
+            "/api/products",
+            Request() with { CategoryId = category.CategoryId });
+        Assert.Equal(HttpStatusCode.Created, productResponse.StatusCode);
+        var product = (await productResponse.Content.ReadFromJsonAsync<ProductResponse>())!;
+
+        var omittedCategory = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}",
+            new { sku = "SKU-1", name = "Updated product", description = "Description", unitOfMeasure = "Each" });
+        Assert.Equal(HttpStatusCode.OK, omittedCategory.StatusCode);
+        Assert.Equal(category.CategoryId, (await omittedCategory.Content.ReadFromJsonAsync<ProductResponse>())!.CategoryId);
+
+        var explicitNullCategory = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}",
+            new { sku = "SKU-1", name = "Updated product", description = "Description", unitOfMeasure = "Each", categoryId = (Guid?)null });
+        Assert.Equal(HttpStatusCode.OK, explicitNullCategory.StatusCode);
+        Assert.Null((await explicitNullCategory.Content.ReadFromJsonAsync<ProductResponse>())!.CategoryId);
+    }
+
+    [Fact]
+    public async Task Company_admin_can_change_product_price()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var product = await Create(client);
+
+        var request = new ChangeProductPriceRequestBody(
+            25.50m,
+            "Supplier price increase",
+            DateTimeOffset.UtcNow.AddMinutes(5));
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var updated =
+            await response.Content.ReadFromJsonAsync<ProductResponse>();
+
+        Assert.NotNull(updated);
+        Assert.Equal(25.50m, updated.CurrentUnitPrice);
+        Assert.NotNull(updated.UpdatedAt);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var history = await db.ProductPriceHistory
+            .IgnoreQueryFilters()
+            .SingleAsync(item => item.ProductId == product.ProductId);
+
+        Assert.Equal(product.ProductId, history.ProductId);
+        Assert.Equal(product.CurrentUnitPrice, history.OldUnitPrice);
+        Assert.Equal(25.50m, history.NewUnitPrice);
+        Assert.Equal("test-user", history.ChangedBy);
+        Assert.Equal("Supplier price increase", history.Reason);
+
+        var outbox = await db.OutboxMessages
+            .IgnoreQueryFilters()
+            .SingleAsync(item =>
+                item.AggregateId == product.ProductId &&
+                item.EventType == "PriceChanged");
+        Assert.Equal("PriceChanged", outbox.EventType);
+        Assert.Equal("1.0", outbox.SchemaVersion);
+        Assert.Equal(product.ProductId, outbox.AggregateId);
+        Assert.Null(outbox.PublishedAt);
+
+        var priceChanged = JsonSerializer.Deserialize<PriceChangedEvent>(
+            outbox.Payload,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(priceChanged);
+        Assert.Equal(product.CurrentUnitPrice, priceChanged.OldUnitPrice);
+        Assert.Equal(25.50m, priceChanged.NewUnitPrice);
+        Assert.Equal("test-user", priceChanged.ChangedBy);
+    }
+
+    [Fact]
+    public async Task Invalid_price_change_is_rejected_without_updating_product()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var product = await Create(client);
+
+        var request = new ChangeProductPriceRequestBody(
+            0m,
+            "Invalid price",
+            DateTimeOffset.UtcNow.AddMinutes(5));
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var unchanged = await client.GetFromJsonAsync<ProductResponse>(
+            $"/api/products/{product.ProductId}");
+
+        Assert.NotNull(unchanged);
+        Assert.Equal(product.CurrentUnitPrice, unchanged.CurrentUnitPrice);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        Assert.Empty(await db.ProductPriceHistory
+            .IgnoreQueryFilters()
+            .Where(item => item.ProductId == product.ProductId)
+            .ToListAsync());
+        Assert.Empty(await db.OutboxMessages
+            .IgnoreQueryFilters()
+            .Where(item =>
+                item.AggregateId == product.ProductId &&
+                item.EventType == "PriceChanged")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Price_change_requires_reason_and_non_past_effective_date()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(Guid.NewGuid().ToString());
+        var product = await Create(client);
+
+        var missingReasonResponse = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                " ",
+                DateTimeOffset.UtcNow.AddMinutes(5)));
+
+        var nullReasonResponse = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                null,
+                DateTimeOffset.UtcNow.AddMinutes(5)));
+
+        var pastDateResponse = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                "Price update",
+                DateTimeOffset.UtcNow.AddMinutes(-5)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, missingReasonResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, nullReasonResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, pastDateResponse.StatusCode);
+
+        var unchanged = await client.GetFromJsonAsync<ProductResponse>(
+            $"/api/products/{product.ProductId}");
+
+        Assert.NotNull(unchanged);
+        Assert.Equal(product.CurrentUnitPrice, unchanged.CurrentUnitPrice);
+    }
+
+    [Fact]
+    public async Task Price_change_without_user_subject_is_rejected()
+    {
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(
+            Guid.NewGuid().ToString(),
+            subject: null);
+        var product = await Create(client);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                "Price update",
+                DateTimeOffset.UtcNow.AddMinutes(5)));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        var unchanged = await client.GetFromJsonAsync<ProductResponse>(
+            $"/api/products/{product.ProductId}");
+
+        Assert.NotNull(unchanged);
+        Assert.Equal(product.CurrentUnitPrice, unchanged.CurrentUnitPrice);
+    }
+
+    [Fact]
+    public async Task Price_history_returns_append_only_changes_newest_first()
+    {
+        var companyId = Guid.NewGuid();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(companyId.ToString());
+        var product = await Create(client);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                "First change",
+                DateTimeOffset.UtcNow.AddMinutes(5)))).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                25m,
+                "Second change",
+                DateTimeOffset.UtcNow.AddMinutes(10)))).StatusCode);
+
+        var history = await client.GetFromJsonAsync<PriceHistoryResponse[]>(
+            $"/api/products/{product.ProductId}/price-history");
+
+        Assert.NotNull(history);
+        Assert.Equal(2, history.Length);
+        Assert.Equal(25m, history[0].NewUnitPrice);
+        Assert.Equal(20m, history[0].OldUnitPrice);
+        Assert.Equal(20m, history[1].NewUnitPrice);
+        Assert.Equal(product.CurrentUnitPrice, history[1].OldUnitPrice);
+        Assert.True(history[0].ChangedAt >= history[1].ChangedAt);
+    }
+
+    [Fact]
+    public async Task Price_history_rows_cannot_be_changed_or_deleted()
+    {
+        var companyId = Guid.NewGuid();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var client = factory.Client(companyId.ToString());
+        var product = await Create(client);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(
+            $"/api/products/{product.ProductId}/price",
+            new ChangeProductPriceRequestBody(
+                20m,
+                "Audited change",
+                DateTimeOffset.UtcNow.AddMinutes(5)))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var history = await db.ProductPriceHistory
+            .IgnoreQueryFilters()
+            .SingleAsync(item => item.ProductId == product.ProductId);
+
+        history.Reason = "Attempted rewrite";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.SaveChangesAsync());
+        Assert.Contains("append-only", error.Message);
+
+        db.Entry(history).State = EntityState.Deleted;
+        error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.SaveChangesAsync());
+        Assert.Contains("append-only", error.Message);
+    }
+
+    [Fact]
+    public async Task Price_history_is_company_admin_only_and_tenant_scoped()
+    {
+        var companyId = Guid.NewGuid();
+        using var factory = new CatalogApiFactory(database.ConnectionString);
+        using var admin = factory.Client(companyId.ToString());
+        var product = await Create(admin);
+
+        using var otherTenant = factory.Client(Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.NotFound, (await otherTenant.GetAsync(
+            $"/api/products/{product.ProductId}/price-history")).StatusCode);
+
+        using var salesRep = factory.Client(companyId.ToString(), "SalesRep");
+        Assert.Equal(HttpStatusCode.Forbidden, (await salesRep.GetAsync(
+            $"/api/products/{product.ProductId}/price-history")).StatusCode);
+
+        using var noTenant = factory.Client(null);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await noTenant.GetAsync(
+            $"/api/products/{product.ProductId}/price-history")).StatusCode);
+    }
+}
+

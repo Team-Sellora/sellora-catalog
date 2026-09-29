@@ -30,6 +30,66 @@ Tests           Unit and integration tests
 
 The service owns its database. `companyId` is an opaque identifier obtained from the authenticated JWT; the Catalog service must never query the Organization database.
 
+## Catalogue behavior
+
+- `GET /api/products` defaults to active products. Use `status=Active`, `status=Inactive`, or `status=All` (case-insensitive); filtering happens before counts and pagination. Other status values return 400.
+- Deactivated products remain retrievable by ID for historical records.
+- Product reads and writes require a valid `companyId` claim; missing or malformed claims return 401.
+- Initial prices must fit `numeric(18,2)`: 0.01 through 9999999999999999.99, with at most two decimal places. Invalid prices return 400 rather than being rounded by the database.
+- SKUs are unique per company. Batch codes are unique per company and product, allowing different products to share a batch code.
+
+## PriceChanged event
+
+An accepted price change writes one `PriceChanged` outbox message in the same
+database transaction as the product update and price-history entry. The relay
+publishes pending messages to `sellora.catalog.v1` and retries failed publishes.
+
+Kafka message key: the product ID. Headers include `event-id`, `event-type`,
+`schema-version`, and `company-id`. Consumers must deduplicate by `event-id`
+because an outbox relay provides at-least-once delivery across a database and
+Kafka failure boundary.
+
+Schema version `1.0` payload fields:
+
+```json
+{
+  "companyId": "uuid",
+  "productId": "uuid",
+  "oldUnitPrice": 250.00,
+  "newUnitPrice": 275.00,
+  "changedBy": "authenticated-user-subject",
+  "reason": "Supplier price increase",
+  "changedAt": "2026-09-06T12:00:00Z",
+  "effectiveFrom": "2026-09-06T12:05:00Z"
+}
+```
+
+Apply migration `20260905180000_ScopeBatchCodesToProduct` before deploying this version to an existing database. It replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
+
+Apply `20260906121212_AddProductPriceHistory` and
+`20260906124412_AddCatalogOutbox` before deploying the price-change workflow.
+
+The service applies pending EF Core migrations at startup before serving requests, matching Organization. The `Testing` environment skips this startup step because the PostgreSQL fixtures apply migrations themselves. Migration `20260905180000_ScopeBatchCodesToProduct` replaces the company-wide batch-code index without deleting data. Rolling back requires resolving any batch codes reused across products before restoring the old unique index.
+
+Apply `20260906121212_AddProductPriceHistory` and
+`20260906124412_AddCatalogOutbox` before deploying the price-change workflow.
+
+API and database tests use Testcontainers.PostgreSql 4.14.0 with `postgres:16`, matching Organization's PostgreSQL fixture. Start Docker Desktop in Linux-container mode before running tests. Testcontainers downloads the image when needed, applies real migrations to temporary databases, and removes its containers afterward. Tests cover search, tenant isolation, price history and outbox persistence, database constraints, and migrations; no SQLite fallback is used.
+
+The API applies pending migrations at startup, except in `Testing`, where fixtures apply them. Local configuration matches Docker Compose (`catalog_db` on port 5434). Start the development database before the API. Hosted environments must override `ConnectionStrings__Default`. Existing data from a different local database is not transferred automatically.
+
+### Startup database failures
+
+If migration or staging seed initialization throws an exception, the service logs the full error and starts in an unavailable state instead of terminating. API requests, including internal routes, return HTTP 503 without exposing database error details. The outbox worker is disabled for that process.
+
+- `/health` returns HTTP 503 after failed initialization; deployment checks must continue using this endpoint to reject an unhealthy deployment.
+- `/health/live` returns HTTP 200 once the HTTP host is running, even after initialization failure. Use this endpoint only for process liveness, never as deployment readiness.
+- Repair the database or configuration based on the startup log, then restart the service to retry initialization. There is no automatic migration retry in the running process.
+
+This prevents application aborts caused by initialization exceptions. Hosting rules configured to restart unhealthy instances can still restart the process; keep liveness and readiness policies distinct.
+
+Run tests with coverage using `dotnet test -c Release --collect "XPlat Code Coverage"`.
+
 ## Local commands
 
 ```bash
@@ -38,4 +98,3 @@ dotnet build
 dotnet test
 docker compose up -d
 ```
-

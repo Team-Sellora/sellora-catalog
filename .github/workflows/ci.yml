@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       solution-path: Sellora.CatalogService.sln
-      sonar-project-key: Team-Sellora_sellora-organization
+      sonar-project-key: Team-Sellora_sellora-catalog
       sonar-organization: team-sellora
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

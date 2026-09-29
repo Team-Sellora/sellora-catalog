@@ -1,0 +1,276 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Sellora.CatalogService.Api.Authorization;
+using Sellora.CatalogService.Api.Contracts;
+using Sellora.CatalogService.Application.Common;
+using Sellora.CatalogService.Application.Products;
+using Sellora.CatalogService.Domain.Tenancy;
+
+namespace Sellora.CatalogService.Api.Controllers;
+
+[ApiController]
+[Route("api/products")]
+public sealed class ProductsController : ControllerBase
+{
+    private readonly IProductService _productService;
+    private readonly ITenantContext _tenantContext;
+
+    public ProductsController(IProductService productService, ITenantContext tenantContext)
+    {
+        _productService = productService;
+        _tenantContext = tenantContext;
+    }
+
+    //get products
+    [HttpGet]
+    [Authorize(Policy = RolePolicies.RequireCatalogReader)]
+    public async Task<ActionResult<PagedResponse<ProductResponse>>> GetProducts(
+    [FromQuery] string? search,
+    [FromQuery] Guid? categoryId,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 20,
+    [FromQuery] string status = "Active",
+    CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.CompanyId is null)
+            return Unauthorized(new { Message = "A valid company identifier was not found in the access token." });
+
+        var normalizedStatus = status.Trim().ToLowerInvariant() switch
+        {
+            "active" => "Active",
+            "inactive" => "Inactive",
+            "all" => "All",
+            _ => null
+        };
+        if (normalizedStatus is null)
+            return BadRequest(new { Message = "Status must be Active, Inactive, or All." });
+
+        var query = new ProductListQuery(
+            search,
+            page,
+            pageSize,
+            normalizedStatus,
+            categoryId);
+
+        var response = await _productService.GetProductsAsync(
+            query,
+            cancellationToken);
+
+        return Ok(response);
+    }
+
+    //get product by id
+    [HttpGet("{productId:guid}")]
+    [Authorize(Policy = RolePolicies.RequireCatalogReader)]
+    public async Task<ActionResult<ProductResponse>> GetProductById(
+    Guid productId,
+    CancellationToken cancellationToken)
+    {
+        if (_tenantContext.CompanyId is null)
+            return Unauthorized(new { Message = "A valid company identifier was not found in the access token." });
+
+        var product = await _productService.GetProductByIdAsync(
+            productId,
+            cancellationToken);
+
+        if (product is null)
+        {
+            return NotFound(new
+            {
+                Message = $"Product '{productId}' was not found."
+            });
+        }
+
+        return Ok(product);
+    }
+
+    //create product
+    [HttpPost]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<ProductResponse>> Create(
+        CreateProductRequestBody body,
+        CancellationToken cancellationToken)
+    {
+        var request = new CreateProductRequest(
+            body.Sku,
+            body.Name,
+            body.Description,
+            body.UnitOfMeasure,
+            body.CurrentUnitPrice,
+            body.BatchCode,
+            body.ManufacturingDate,
+            body.ExpiryDate,
+            body.CategoryId);
+
+        var result = await _productService.CreateAsync(
+            request,
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            CreateProductOutcome.Success =>
+                Created(
+                    $"/api/products/{result.Product!.ProductId}",
+                    result.Product),
+
+            CreateProductOutcome.InvalidRequest =>
+                BadRequest(new { result.Message }),
+
+            CreateProductOutcome.TenantNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            CreateProductOutcome.DuplicateSku =>
+                Conflict(new { result.Message }),
+
+            _ => Problem(
+                title: "Product creation failed.",
+                statusCode: StatusCodes.Status500InternalServerError)
+        };
+    }
+
+    // change product price
+    [HttpPut("{productId:guid}/price")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<ProductResponse>> ChangePrice(
+        Guid productId,
+        ChangeProductPriceRequestBody body,
+        CancellationToken cancellationToken)
+    {
+        var request = new ChangeProductPriceRequest(
+            body.NewUnitPrice,
+            body.Reason,
+            body.EffectiveFrom);
+
+        var result = await _productService.ChangePriceAsync(
+            productId,
+            request,
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            ChangeProductPriceOutcome.Success =>
+                Ok(result.Product),
+
+            ChangeProductPriceOutcome.InvalidRequest =>
+                BadRequest(new { result.Message }),
+
+            ChangeProductPriceOutcome.NotFound =>
+                NotFound(new { result.Message }),
+
+            ChangeProductPriceOutcome.TenantNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            ChangeProductPriceOutcome.UserNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            _ => Problem(
+                title: "Product price change failed.",
+                statusCode: StatusCodes.Status500InternalServerError)
+        };
+    }
+
+    //get product price history
+    [HttpGet("{productId:guid}/price-history")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<IReadOnlyCollection<PriceHistoryResponse>>> GetPriceHistory(
+        Guid productId,
+        CancellationToken cancellationToken)
+    {
+        if (_tenantContext.CompanyId is null)
+        {
+            return Unauthorized(new
+            {
+                Message = "A valid company identifier was not found in the access token."
+            });
+        }
+
+        var history = await _productService.GetPriceHistoryAsync(
+            productId,
+            cancellationToken);
+
+        if (history is null)
+        {
+            return NotFound(new
+            {
+                Message = $"Product '{productId}' was not found."
+            });
+        }
+
+        return Ok(history);
+    }
+
+    //deactivate product
+    [HttpPatch("{productId:guid}/deactivate")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<ProductResponse>> Deactivate(
+    Guid productId,
+    CancellationToken cancellationToken)
+    {
+        var result = await _productService.DeactivateAsync(
+            productId,
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            DeactivateProductOutcome.Success =>
+                Ok(result.Product),
+
+            DeactivateProductOutcome.NotFound =>
+                NotFound(new { result.Message }),
+
+            DeactivateProductOutcome.AlreadyInactive =>
+                Conflict(new { result.Message }),
+
+            DeactivateProductOutcome.TenantNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            _ => Problem(
+                title: "Product deactivation failed.",
+                statusCode: StatusCodes.Status500InternalServerError)
+        };
+    }
+
+    //update product
+    [HttpPut("{productId:guid}")]
+    [Authorize(Policy = RolePolicies.RequireCompanyAdmin)]
+    public async Task<ActionResult<ProductResponse>> Update(
+    Guid productId,
+    UpdateProductRequestBody body,
+    CancellationToken cancellationToken)
+    {
+        var request = new UpdateProductRequest(
+            body.Sku,
+            body.Name,
+            body.Description,
+            body.UnitOfMeasure,
+            body.CategoryId,
+            body.IsCategoryIdSpecified);
+
+        var result = await _productService.UpdateAsync(
+            productId,
+            request,
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            UpdateProductOutcome.Success =>
+                Ok(result.Product),
+
+            UpdateProductOutcome.InvalidRequest =>
+                BadRequest(new { result.Message }),
+
+            UpdateProductOutcome.DuplicateSku =>
+                Conflict(new { result.Message }),
+
+            UpdateProductOutcome.NotFound =>
+                NotFound(new { result.Message }),
+
+            UpdateProductOutcome.TenantNotAvailable =>
+                Unauthorized(new { result.Message }),
+
+            _ => Problem(
+                title: "Product update failed.",
+                statusCode: StatusCodes.Status500InternalServerError)
+        };
+    }
+}
