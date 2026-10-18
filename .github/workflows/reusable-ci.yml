@@ -93,7 +93,9 @@ jobs:
             /k:"${{ inputs.sonar-project-key }}" \
             /o:"${{ inputs.sonar-organization }}" \
             /d:sonar.token="$SONAR_TOKEN" \
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
+            /d:sonar.cs.vstest.reportsPaths="TestResults/*.trx" \
+            /d:sonar.exclusions="**/Persistence/Migrations/**"
 
       - name: Build solution
         run: |
@@ -106,6 +108,7 @@ jobs:
           dotnet test "${{ inputs.solution-path }}" \
             --configuration Release \
             --no-build \
+            --settings coverlet.runsettings \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults \
             --logger "trx;LogFileName=test-results.trx"

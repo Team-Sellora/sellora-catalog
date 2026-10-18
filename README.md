@@ -88,9 +88,16 @@ If migration or staging seed initialization throws an exception, the service log
 
 This prevents application aborts caused by initialization exceptions. Hosting rules configured to restart unhealthy instances can still restart the process; keep liveness and readiness policies distinct.
 
-Run tests with coverage using `dotnet test -c Release --collect "XPlat Code Coverage"`.
+Run tests with coverage using `dotnet test -c Release --settings coverlet.runsettings --collect "XPlat Code Coverage"`. The settings file emits the OpenCover report SonarCloud imports and excludes generated EF Core migrations.
 
 ## Local commands
+
+Database credentials are not committed. Create a git-ignored `.env` file for Docker Compose and store the matching connection string in .NET user secrets (Development loads them automatically):
+
+```bash
+echo "POSTGRES_PASSWORD=<choose-a-local-password>" > .env
+dotnet user-secrets set "ConnectionStrings:Default"   "Host=localhost;Port=5434;Database=catalog_db;Username=sellora;Password=<same-password>"   --project src/Sellora.CatalogService.Api
+```
 
 ```bash
 dotnet restore
@@ -98,3 +105,7 @@ dotnet build
 dotnet test
 docker compose up -d
 ```
+
+## Identity Server certificate (Development and Staging)
+
+The shared development Identity Server uses a self-signed certificate. Development and Staging trust only that certificate, pinned by its SHA-256 thumbprint in `Jwt:BackchannelCertificateSha256`; TLS validation is never disabled. If the Identity Server certificate is replaced, update the pin (or override `Jwt__BackchannelCertificateSha256` in the hosting environment). Production ignores the pin and requires a publicly trusted certificate.

@@ -35,7 +35,7 @@ jobs:
           test -f ./publish/Sellora.CatalogService.Api.runtimeconfig.json
 
       - name: Deploy to production
-        uses: azure/webapps-deploy@v3
+        uses: azure/webapps-deploy@02a81bead70021f5284939794bcec79c271ab383 # v3.0.8
         with:
           app-name: sellora-catalog
           publish-profile: ${{ secrets.AZURE_WEBAPP_PRODUCTION_PUBLISH_PROFILE }}
