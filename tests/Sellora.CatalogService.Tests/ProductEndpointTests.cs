@@ -15,6 +15,8 @@ namespace Sellora.CatalogService.Tests;
 
 public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) : IClassFixture<PostgreSqlConstraintFixture>
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     [Theory]
     [InlineData("tEsT pRoDuCt")]
     [InlineData("sKu-SeArCh")]
@@ -278,7 +280,7 @@ public sealed class ProductEndpointTests(PostgreSqlConstraintFixture database) :
 
         var priceChanged = JsonSerializer.Deserialize<PriceChangedEvent>(
             outbox.Payload,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            WebJsonOptions);
         Assert.NotNull(priceChanged);
         Assert.Equal(product.CurrentUnitPrice, priceChanged.OldUnitPrice);
         Assert.Equal(25.50m, priceChanged.NewUnitPrice);

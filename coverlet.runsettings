@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coverage settings shared by CI and local runs (passed to dotnet test via the settings option). -->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <!-- SonarCloud reads OpenCover reports (sonar.cs.opencover.reportsPaths). -->
+          <Format>opencover,cobertura</Format>
+          <Include>[Sellora.CatalogService.*]*</Include>
+          <Exclude>[Sellora.CatalogService.Tests]*</Exclude>
+          <!-- EF Core migrations and snapshots are generated code. -->
+          <ExcludeByFile>**/Persistence/Migrations/*.cs</ExcludeByFile>
+          <ExcludeByAttribute>GeneratedCodeAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+          <SkipAutoProps>false</SkipAutoProps>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

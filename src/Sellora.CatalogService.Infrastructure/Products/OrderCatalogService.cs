@@ -107,16 +107,8 @@ public sealed class OrderCatalogService : IOrderCatalogService
                 var isAvailable =
                     isActive && hasValidBatch;
 
-                string? unavailableReason = null;
-
-                if (!isActive)
-                {
-                    unavailableReason = ProductInactive;
-                }
-                else if (!hasValidBatch)
-                {
-                    unavailableReason = NoActiveUnexpiredBatch;
-                }
+                var unavailableReason =
+                    GetUnavailableReason(isActive, hasValidBatch);
 
                 var response = new ProductForOrderResponse(
                     product.ProductId,
@@ -171,6 +163,18 @@ public sealed class OrderCatalogService : IOrderCatalogService
             .ToArray();
 
         return new ProductResolutionResponse(orderedItems);
+    }
+
+    private static string? GetUnavailableReason(
+        bool isActive,
+        bool hasValidBatch)
+    {
+        if (!isActive)
+        {
+            return ProductInactive;
+        }
+
+        return hasValidBatch ? null : NoActiveUnexpiredBatch;
     }
 
     public async Task<IReadOnlyCollection<OrderCatalogueProductResponse>>
