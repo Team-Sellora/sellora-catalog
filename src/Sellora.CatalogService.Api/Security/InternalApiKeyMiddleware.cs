@@ -47,7 +47,7 @@ public sealed class InternalApiKeyMiddleware
             await context.Response.WriteAsJsonAsync(new
             {
                 Message = "The internal API is not configured."
-            });
+            }, context.RequestAborted);
 
             return;
         }
@@ -63,7 +63,7 @@ public sealed class InternalApiKeyMiddleware
             await context.Response.WriteAsJsonAsync(new
             {
                 Message = "A valid internal API key is required."
-            });
+            }, context.RequestAborted);
 
             return;
         }

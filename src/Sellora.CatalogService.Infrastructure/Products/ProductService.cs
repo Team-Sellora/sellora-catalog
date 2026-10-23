@@ -14,6 +14,9 @@ namespace Sellora.CatalogService.Infrastructure.Products;
 
 public sealed class ProductService : IProductService
 {
+    private static readonly JsonSerializerOptions PayloadSerializerOptions =
+        new(JsonSerializerDefaults.Web);
+
     private readonly CatalogDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserContext _currentUserContext;
@@ -452,7 +455,7 @@ public sealed class ProductService : IProductService
             SchemaVersion = "1.0",
             Payload = JsonSerializer.Serialize(
                 priceChanged,
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                PayloadSerializerOptions),
             OccurredAt = now,
             NextAttemptAt = now
         });
@@ -599,7 +602,7 @@ public sealed class ProductService : IProductService
             return "A reason for the price change is required.";
         }
 
-        if (request.Reason!.Trim().Length > 500)
+        if (request.Reason.Trim().Length > 500)
         {
             return "The price-change reason cannot exceed 500 characters.";
         }

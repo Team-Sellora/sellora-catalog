@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sellora.CatalogService.Api.Authorization;
+using Sellora.CatalogService.Api.Hosting;
 using Sellora.CatalogService.Api.Identity;
 using Sellora.CatalogService.Api.Security;
 using Sellora.CatalogService.Api.Tenancy;
@@ -13,7 +14,6 @@ using Sellora.CatalogService.Domain.Tenancy;
 using Sellora.CatalogService.Infrastructure.Categories;
 using Sellora.CatalogService.Infrastructure.Outbox;
 using Sellora.CatalogService.Infrastructure.Persistence;
-using Sellora.CatalogService.Infrastructure.Persistence.Seeding;
 using Sellora.CatalogService.Infrastructure.Products;
 using Serilog;
 
@@ -48,18 +48,14 @@ builder.Services
             RoleClaimType = "roles",
         };
 
-        // The shared development Identity Server currently uses a certificate
-        // that is not trusted by local developer machines. This exception is
-        // deliberately limited to Development; production must use a trusted
-        // certificate and must never bypass TLS validation.
-        if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
+        // Development and Staging trust the shared Identity Server's pinned
+        // self-signed certificate; production always uses default validation.
+        var backchannelHandler = IdentityServerBackchannel.CreateHandler(
+            builder.Environment,
+            builder.Configuration);
+        if (backchannelHandler is not null)
         {
-            options.BackchannelHttpHandler = new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback =
-                    HttpClientHandler
-                        .DangerousAcceptAnyServerCertificateValidator
-            };
+            options.BackchannelHttpHandler = backchannelHandler;
         }
     });
 
@@ -122,17 +118,10 @@ var allowedOrigins = builder.Configuration
     .Get<string[]>() ?? Array.Empty<string>();
 
 builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        if (allowedOrigins.Length > 0)
-        {
-            policy.WithOrigins(allowedOrigins);
-        }
-
-        policy.AllowAnyHeader().AllowAnyMethod();
-    });
-});
+    options.AddDefaultPolicy(policy => policy
+        .WithOrigins(allowedOrigins)
+        .AllowAnyHeader()
+        .AllowAnyMethod()));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -143,52 +132,11 @@ app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
 
 // Match Organization; test fixtures migrate their isolated databases themselves.
-if (!app.Environment.IsEnvironment("Testing"))
-{
-    try
-    {
-        await using var scope = app.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
-        await db.Database.MigrateAsync();
+databaseReady = app.Environment.IsEnvironment("Testing")
+    || await DatabaseInitialization.TryInitializeAsync(app);
 
-        if (app.Environment.IsStaging())
-        {
-            await DevelopmentCatalogSeeder.SeedAsync(db);
-        }
-        databaseReady = true;
-    }
-    catch (Exception exception)
-    {
-        app.Logger.LogCritical(exception,
-            "Catalog database initialization failed. Serving HTTP 503 with outbox processing disabled. Repair the database and restart the service.");
-    }
-}
-else
-{
-    databaseReady = true; // Test fixtures apply migrations before creating the host.
-}
-
-// Liveness remains available without database access. Readiness (/health) is
-// unhealthy after a failed migration. Never expose database exception details.
-app.Use(async (context, next) =>
-{
-    if (context.Request.Path.Equals(new PathString("/health/live")))
-    {
-        await Results.Ok(new { Status = "Alive" }).ExecuteAsync(context);
-        return;
-    }
-
-    if (!databaseReady)
-    {
-        await Results.Problem(
-            title: "Catalog service unavailable",
-            detail: "Database initialization has not completed successfully.",
-            statusCode: StatusCodes.Status503ServiceUnavailable).ExecuteAsync(context);
-        return;
-    }
-
-    await next(context);
-});
+app.Use((context, next) =>
+    DatabaseInitialization.GateRequestsAsync(context, next, databaseReady));
 
 if (app.Environment.IsDevelopment())
 {
@@ -209,13 +157,11 @@ app.MapGet("/whoami", (HttpContext context) =>
     Results.Ok(context.User.Claims.Select(c => new { c.Type, c.Value })))
     .RequireAuthorization();
 
-app.Run();
+await app.RunAsync();
 
-public partial class Program;
-
-// Do not construct or start the database-backed relay when initialization fails.
-internal sealed class DatabaseUnavailableService : IHostedService
+public partial class Program
 {
-    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    protected Program()
+    {
+    }
 }
